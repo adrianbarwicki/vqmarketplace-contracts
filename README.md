@@ -9,4 +9,4 @@ VQ Marketplace smart contracts are Ethereum smart contracts which allow anyone t
 * Smart contracts for the transaction model without disputes
 
 ## Transaction model
-![Transaction model in VQ Marketplace](vqmarketplace-contracts/vq-transaction-model.png)
+![Transaction model in VQ Marketplace](https://raw.githubusercontent.com/adrianbarwicki/vqmarketplace-contracts/master/vq-transaction-model.png)
