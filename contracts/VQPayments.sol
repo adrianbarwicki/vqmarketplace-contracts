@@ -1,9 +1,6 @@
     pragma solidity ^0.4.16;
     contract VQPayments
-    {
-       
-        //payee needs to confirm the transaction(escrow) first. unless he confirms, the payer can withdraw his money back
-        
+    {       
         //@todo
         //check fee calculation formula
         //expireDate: this either requires a polling from outside or poor man's cron
