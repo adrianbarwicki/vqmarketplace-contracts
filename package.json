@@ -1,0 +1,22 @@
+{
+  "name": "vqmarketplace-contracts",
+  "version": "1.0.0",
+  "description": "",
+  "main": "truffle.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "dev": "lite-server",
+    "build": "truffle compile",
+    "reset": "truffle migrate --reset",
+    "compile": "truffle compile",
+    "migrate": "truffle migrate",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "VQ Labs",
+  "license": "MIT",
+  "devDependencies": {
+    "lite-server": "^2.3.0"
+  }
+}
