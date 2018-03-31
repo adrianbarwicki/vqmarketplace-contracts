@@ -147,13 +147,16 @@
             Transaction memory blankTransaction;
             TransactionReference memory blankTransactionReference;
 
-            Deposits[owner] += msg.value * (msg.value/4000); 
+            // old: Deposits[owner] += msg.value * (msg.value/4000);
+            // 0.25%=0.0025 for the owner for the contract (1/4000)
+            Deposits[owner] += msg.value / 400; 
             
             blankTransaction.payer = msg.sender;
             blankTransaction.payee = payee;
             blankTransaction.manager = manager;
-            blankTransaction.manager_fee = getManagerFee(manager)*msg.value/1000;
-            blankTransaction.amount = msg.value - (msg.value/4000) - blankTransaction.manager_fee;
+            blankTransaction.manager_fee = getManagerFee(manager) * msg.value/1000;
+            // remove default manager fee. It is only due if parties fight, not by default!
+            blankTransaction.amount = msg.value - (msg.value/400) - blankTransaction.manager_fee;
             blankTransaction.ref = ref;
 
             blankTransactionReference.payer = msg.sender;
