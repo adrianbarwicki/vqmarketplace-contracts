@@ -221,6 +221,7 @@
             currentTransaction.refunded = true;
             
             uint manager_fee = getManagerFee(currentTransaction.manager)*currentTransaction.amount/1000;
+            //@todo
             uint amount = 0;
             Deposits[currentTransaction.payer] += amount;
 
