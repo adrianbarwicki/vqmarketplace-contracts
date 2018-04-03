@@ -1,4 +1,5 @@
 pragma solidity ^0.4.17;
+
 contract VQPayments
 {       
     //@todo
@@ -69,7 +70,7 @@ contract VQPayments
         bool is_locked;
         bool is_cancelled;
 
-        //bytes32 ref;
+        bytes32 ref;
     }
 
     struct TransactionReference
@@ -89,7 +90,6 @@ contract VQPayments
     mapping(address => TransactionReference[]) public TransactionRegistry;
     mapping(address => Manager) public ManagerRegistry;
     mapping(address => bool) public LockedUserRegistry;
-            
     mapping(address => uint) public Deposits;
 
     function VQPayments() public
@@ -133,8 +133,8 @@ contract VQPayments
 
     function createTransaction(
         address payee,
-        address manager
-        //bytes32 ref
+        address manager,
+        bytes32 ref
     )
         public
         payable
@@ -153,7 +153,7 @@ contract VQPayments
         blankTransaction.payee = payee;
         blankTransaction.manager = manager;
         blankTransaction.amount = msg.value - (msg.value/400);
-        //blankTransaction.ref = ref;
+        blankTransaction.ref = ref;
 
         blankTransactionReference.payer = msg.sender;
         blankTransactionReference.tx_index = PayerRegistry[msg.sender].length;
@@ -255,8 +255,7 @@ contract VQPayments
             address,
             uint,
             bytes32,
-            uint//,
-            //bytes32
+            bytes32
         )
     {
         bytes32 status;
@@ -264,17 +263,17 @@ contract VQPayments
         if (userType == 0)
         {
             currentTransaction = PayerRegistry[user][txID];
-            status = checkTransactionStatus(user, txID);
+            status = getTransactionStatus(user, txID);
         } 
         else if (userType == 1)
         {  
             currentTransaction = PayerRegistry[PayeeRegistry[user][txID].payer][PayeeRegistry[user][txID].tx_index];
-            status = checkTransactionStatus(currentTransaction.payer, PayeeRegistry[user][txID].tx_index);
+            status = getTransactionStatus(currentTransaction.payer, PayeeRegistry[user][txID].tx_index);
         }   
         else if (userType == 2)
         {        
             currentTransaction = PayerRegistry[TransactionRegistry[user][txID].payer][TransactionRegistry[user][txID].tx_index];
-            status = checkTransactionStatus(currentTransaction.payer, TransactionRegistry[user][txID].tx_index);
+            status = getTransactionStatus(currentTransaction.payer, TransactionRegistry[user][txID].tx_index);
         }
 
         return (
@@ -283,8 +282,7 @@ contract VQPayments
             currentTransaction.manager,
             currentTransaction.amount,
             status,
-            currentTransaction.manager_fee//,
-            //currentTransaction.ref
+            currentTransaction.ref
         );
     }   
 
@@ -297,9 +295,7 @@ contract VQPayments
         view
         returns (
             address[],
-            address[],
-            uint[],
-            bytes32[]
+            address[]
         )
     {
         uint count;
@@ -315,23 +311,16 @@ contract VQPayments
         
         address[] memory payees = new address[](count);
         address[] memory managers = new address[](count);
-        uint[] memory amounts = new uint[](count);
-        bytes32[] memory statuses = new bytes32[](count);
         
         for (uint i = 0; i < count; i++)
         {
-
             payees[i] = (PayerRegistry[payer][offset + i].payee);
             managers[i] = (PayerRegistry[payer][offset + i].manager);
-            amounts[i] = (PayerRegistry[payer][offset + i].amount);
-            statuses[i] = checkTransactionStatus(payer, offset + i);
         }
         
         return (
             payees,
-            managers,
-            amounts,
-            statuses
+            managers
         );
     }
                 
@@ -344,15 +333,11 @@ contract VQPayments
         view
         returns (
             address[],
-            address[],
-            uint[],
-            bytes32[]
+            address[]
         )
     {
         address[] memory payers = new address[](limit);
         address[] memory managers = new address[](limit);
-        uint[] memory amounts = new uint[](limit);
-        bytes32[] memory statuses = new bytes32[](limit);
 
         for (uint i = 0; i < limit; i++)
         {
@@ -363,10 +348,11 @@ contract VQPayments
                 
             payers[i] = PayeeRegistry[user][offset + i].payer;
             managers[i] = PayerRegistry[payers[i]][PayeeRegistry[user][offset + i].tx_index].manager;
-            amounts[i] = PayerRegistry[payers[i]][PayeeRegistry[user][offset + i].tx_index].amount;
-            statuses[i] = checkTransactionStatus(PayeeRegistry[user][offset + i].payer, PayeeRegistry[user][offset + i].tx_index);
         }
-        return (payers, managers, amounts, statuses);
+        return (
+            payers,
+            managers
+        );
     }
 
     function transactionAudit(
@@ -379,14 +365,12 @@ contract VQPayments
         returns (
             address[],
             address[],
-            uint[],
-            bytes32[]
+            address[]
         )
     {
         address[] memory payers = new address[](limit);
         address[] memory payees = new address[](limit);
-        uint[] memory amounts = new uint[](limit);
-        bytes32[] memory statuses = new bytes32[](limit);
+        address[] memory managers = new address[](limit);
 
         for (uint i = 0; i < limit; i++)
         {
@@ -397,18 +381,16 @@ contract VQPayments
 
             payers[i] = TransactionRegistry[user][offset + i].payer;
             payees[i] = PayerRegistry[payers[i]][TransactionRegistry[user][offset + i].tx_index].payee;
-            amounts[i] = PayerRegistry[payers[i]][TransactionRegistry[user][offset + i].tx_index].amount;
-            statuses[i] = checkTransactionStatus(TransactionRegistry[user][offset + i].payer, TransactionRegistry[user][offset + i].tx_index);
+            managers[i] = PayerRegistry[payers[i]][TransactionRegistry[user][offset + i].tx_index].manager;
         }
         return (
             payers,
             payees,
-            amounts,
-            statuses
+            managers
         );
     }
 
-    function checkTransactionStatus(
+    function getTransactionStatus(
         address payer,
         uint txID
     )
@@ -420,7 +402,10 @@ contract VQPayments
     {
         bytes32 status = "";
 
-        if (PayerRegistry[payer][txID].paid)
+        if (PayerRegistry[payer][txID].is_accepted) {
+            status = "Transaction Accepted";
+        }
+        else if (PayerRegistry[payer][txID].paid)
         {
             status = "Paid";
         }
@@ -445,6 +430,49 @@ contract VQPayments
         }
     
         return status;
+    }
+
+    function setTransactionStatus(
+        address user,
+        uint txID,
+        bytes32 attr,
+        bool status
+    )
+        public
+        onlyOwner
+        returns (
+            bool
+        )
+    {
+        address payer = PayeeRegistry[user][txID].payer;
+        uint _txID = PayeeRegistry[user][txID].tx_index;
+
+        if (attr == "is_accepted")
+        {
+            PayerRegistry[payer][_txID].is_accepted = status;
+        }
+        else if (attr == "has_dispute")
+        {
+            PayerRegistry[payer][_txID].has_dispute = status;
+        }
+        else if (attr == "paid")
+        {
+            PayerRegistry[payer][_txID].paid = status;
+        }
+        else if (attr == "refunded")
+        {
+            PayerRegistry[payer][_txID].refunded = status;
+        }
+        else if (attr == "is_locked")
+        {
+            PayerRegistry[payer][_txID].is_locked = status;
+        }
+        else if (attr == "is_cancelled")
+        {
+            PayerRegistry[payer][_txID].is_cancelled = status;
+        }
+        
+        return true;
     }
 
     function releaseDeposit(
@@ -610,6 +638,47 @@ contract VQPayments
         )
     {
         return Deposits[user];
+    }
+
+    function getUserTransactionsDetails(
+        address user,
+        uint offset,
+        uint limit
+    )
+        public
+        view
+        returns (
+            uint[],
+            bytes32[],
+            bytes32[]
+        )
+    {
+        uint count;
+
+        if (PayerRegistry[user].length < limit)
+        {
+            count = PayerRegistry[user].length;
+        }
+        else
+        {
+            count = limit;
+        }
+
+        uint[] memory amounts = new uint[](count);
+        bytes32[] memory statuses = new bytes32[](count);
+        bytes32[] memory refs = new bytes32[](count);
+        
+        for (uint i = 0; i < count; i++)
+        {
+            amounts[i] = (PayerRegistry[user][offset + i].amount);
+            statuses[i] = getTransactionStatus(user, offset + i);
+            refs[i] = (PayerRegistry[user][offset + i].ref);
+        }
+        return (
+            amounts,
+            statuses,
+            refs
+        );
     }
     
 }

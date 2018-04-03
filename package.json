@@ -18,5 +18,9 @@
   "license": "MIT",
   "devDependencies": {
     "lite-server": "^2.3.0"
+  },
+  "dependencies": {
+    "babel-polyfill": "^6.26.0",
+    "babel-register": "^6.26.0"
   }
 }
