@@ -59,7 +59,8 @@ contract VQPayments
         address payer;
         address payee;
         address manager;
-                                    
+
+        //todo remove                            
         uint manager_fee;
         uint amount;
 
@@ -547,6 +548,25 @@ contract VQPayments
         onlyOwner
     {
         PayerRegistry[user][txID].is_locked = true;
+    }
+
+    function unlockUserAccess(
+        address user
+    )
+        public
+        onlyOwner
+    {
+        LockedUserRegistry[user] = false;
+    }
+
+    function unlockTransaction(
+        address user,
+        uint txID
+    )
+        public
+        onlyOwner
+    {
+        PayerRegistry[user][txID].is_locked = false;
     }
 
     function createDispute(

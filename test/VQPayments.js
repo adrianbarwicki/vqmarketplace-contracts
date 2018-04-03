@@ -5,12 +5,9 @@ const expectThrow = require('./expectThrow.js');
 const expectCorrectUser = require('./expectCorrectUser.js');
 
 const VQPayments = artifacts.require('../contracts/VQPayments.sol');
-const UserProxy = artifacts.require('../contracts/UserProxy.sol');
 
 contract('VQPayments', async (accounts) => {
   
-  let contract;
-  let proxy;
 
   let TRANSACTION_STATE = {
     is_accepted: "is_accepted",
@@ -31,12 +28,6 @@ contract('VQPayments', async (accounts) => {
   beforeEach('setup contract for each test', async () => {
     return VQPayments.deployed().then((instance) => {
       contract = instance;
-    });
-  });
-
-  beforeEach('setup user proxy for each test', async () => {
-    return UserProxy.deployed().then((instance) => {
-      proxy = instance;
     });
   });
 
@@ -156,21 +147,7 @@ contract('VQPayments', async (accounts) => {
   describe("Function: acceptTransaction", () => {
     // not sure if these are correct, they are semi correct
     it("prohibited other users from accepting the transaction", async () => {
-      proxy.changeUser(TEST_ACCOUNTS.payee).then(() => {
-        proxy.getInstance().then((instance) => {
-          instance.createTransaction(
-            TEST_ACCOUNTS.payee, //payee
-            TEST_ACCOUNTS.manager, //manager
-            web3.toHex("test"), //ref
-          {
-            value: web3.toWei(1, "ether"), //1000000000000000000 wei
-            from: TEST_ACCOUNTS.payer //payer
-          }).then(result => {
-            assert.equal(result.receipt.status, 1);
-          });
-        });
-      });
-      /* try {
+      try {
         await contract.acceptTransaction(0, {from: TEST_ACCOUNTS.manager});
       } catch (error) {
         // TODO: Check jump destination to destinguish between a throw
@@ -183,10 +160,10 @@ contract('VQPayments', async (accounts) => {
         const outOfGas = error.message.search('out of gas') >= 0;
         const revert = error.message.search('revert') >= 0;
         assert.isTrue(invalidOpcode && !outOfGas && !revert);
-      } */
+      }
     });
 
-    /* it("allowed payee to accept the transaction when the status is pending", async () => {
+    it("allowed payee to accept the transaction when the status is pending", async () => {
       try {
         await contract.acceptTransaction(0, {from: TEST_ACCOUNTS.payee});
       } catch (error) {
@@ -201,7 +178,7 @@ contract('VQPayments', async (accounts) => {
         const revert = error.message.search('revert') >= 0;
         assert.isTrue(!invalidOpcode && !outOfGas && revert);
       }
-    }); */   
+    });   
   });
 
   describe("Function: cancelTransaction", () => {
