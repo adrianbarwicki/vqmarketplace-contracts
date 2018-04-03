@@ -321,4 +321,42 @@ contract('VQPayments', async (accounts) => {
     });
   });
 
+  describe("Functions: getTransactionStatus", () => {
+    it("got correct string status for dynamic state", async () => {
+      contract.getTransactionStatus(TEST_ACCOUNTS.payer, 0).then((ts) => {
+        assert.equal(ts.toString().replace(/0+$/g, ""), web3.toHex("In Progress"));
+      });
+
+       contract.setTransactionStatus(TEST_ACCOUNTS.payer, 0, "is_accepted", true, { from: TEST_ACCOUNTS.owner }).then(ts => {
+        contract.getTransactionStatus(TEST_ACCOUNTS.payer, 0).then((ts) => {
+          assert.equal(ts.toString().replace(/0+$/g, ""), web3.toHex("Transaction Accepted"));
+        });
+      });
+
+ /*     contract.setTransactionStatus(TEST_ACCOUNTS.payer, 0, "paid", true).then(ts => {
+        contract.getTransactionStatus(TEST_ACCOUNTS.payer, 0).then((ts) => {
+          assert.equal(ts.toString().replace(/0+$/g, ""), web3.toHex("Paid"));
+        });
+      });
+
+      contract.setTransactionStatus(TEST_ACCOUNTS.payer, 0, "refunded", true).then(ts => {
+        contract.getTransactionStatus(TEST_ACCOUNTS.payer, 0).then((ts) => {
+          assert.equal(ts.toString().replace(/0+$/g, ""), web3.toHex("Refunded"));
+        });
+      });
+
+      contract.setTransactionStatus(TEST_ACCOUNTS.payer, 0, "is_locked", true).then(ts => {
+        contract.getTransactionStatus(TEST_ACCOUNTS.payer, 0).then((ts) => {
+          assert.equal(ts.toString().replace(/0+$/g, ""), web3.toHex("Transaction Locked"));
+        });
+      }); */
+    });
+
+    /* it("got correct string status for locked user", async () => {
+      contract.getTransactionStatus(TEST_ACCOUNTS.payer, 0, { from: TEST_ACCOUNTS.owner }).then((ts) => {
+        assert.equal(ts.toString().replace(/0+$/g, ""), web3.toHex("User Access Locked"));
+      });
+    }); */
+  });
+
 });
