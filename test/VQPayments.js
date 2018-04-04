@@ -11,10 +11,16 @@ const VQPayments = artifacts.require('../contracts/VQPayments.sol');
 contract('VQPayments', async (accounts) => {
     
     //KEEP IN MIND
-    //tests fail randomly so rerun them
-    //the tests are being tested on a single transaction/user
-    //so remember to always revert the state change that you make
-    //to transaction and users
+    //1)    tests fail randomly so rerun them
+
+    //2)    the tests are being tested on a single transaction/user
+    //      so remember to always revert the state change that you make
+    //      to transaction and users
+
+    //3)    if you do transaction by another user and want to calculate the before and after balance
+    //      check withdraw test, it contains an example on how to correctly calculate
+    //      the gas used
+
 
     let TRANSACTION_STATE = {
         is_accepted: "is_accepted",
@@ -41,39 +47,6 @@ contract('VQPayments', async (accounts) => {
     it("has the right owner", async () => {
         assert.equal(await contract.owner(), TEST_ACCOUNTS.owner);
     });
-    
-    /*   it("has the right interface", async () => {
-        // assert.isDefined(contract.invest);
-        assert.isDefined(contract.withdraw);
-    }); */
-    
-    /*   onlyOwner
-    onlyPayer
-    onlyPayee
-    onlyManager
-    onlyWhen
-    onlyFreeUser
-    onlyFreeTransaction
-    hasDeposit
-    
-    withdrawDeposits
-    
-
-    createTransaction
-    acceptTransaction
-    cancelTransaction
-    getUserTransactionsCount
-    getUserTransactionByID
-    payerAudit
-    payeeAudit
-    transactionAudit
-    getTransactionStatus
-    setTransactionStatus
-    lockUnlockUserAccess
-    lockUnlockTransaction
-    releaseDeposit
-    */
-
 
     describe("Function: createTransaction", () => {
         it("created the transaction", async () => {
@@ -563,7 +536,5 @@ contract('VQPayments', async (accounts) => {
         });
 
     });
-     
-
         
 });
