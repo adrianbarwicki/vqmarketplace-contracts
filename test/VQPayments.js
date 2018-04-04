@@ -1,6 +1,7 @@
 require('babel-register')
 require('babel-polyfill')
 const _ = require('lodash');
+const BigNumber = require('bignumber.js');
 
 //const expectThrow = require('./expectThrow.js');
 //const expectCorrectUser = require('./expectCorrectUser.js');
@@ -10,6 +11,7 @@ const VQPayments = artifacts.require('../contracts/VQPayments.sol');
 contract('VQPayments', async (accounts) => {
     
     //KEEP IN MIND
+    //tests fail randomly so rerun them
     //the tests are being tested on a single transaction/user
     //so remember to always revert the state change that you make
     //to transaction and users
@@ -523,17 +525,11 @@ contract('VQPayments', async (accounts) => {
     });     
 
     describe("Functions: releaseDeposit & withdrawDeposits", () => {
-        
-        console.log('PAYER', TEST_ACCOUNTS.payer);
-        console.log('PAYEE', TEST_ACCOUNTS.payee);
-
         it("releaseDeposit released the deposit to payee's Deposit", async () => {
             await contract.getUserTransactionByID(TEST_ACCOUNTS.payer, 0, 0).then(async (tbid) => {
                 let transaction = {
                     amount: tbid[3]
                 };
-
-                originalAmount = transaction.amount.toNumber();
 
                 await contract.releaseDeposit(
                     TEST_ACCOUNTS.payer,
@@ -553,11 +549,15 @@ contract('VQPayments', async (accounts) => {
                     amount: tbid[3]
                 };
 
-                const balanceBeforeWithdraw = web3.eth.getBalance(TEST_ACCOUNTS.payee).toNumber();
-                const balanceAfterWithdraw = web3.eth.getBalance(TEST_ACCOUNTS.payee).toNumber() + transaction.amount.toNumber();
+                const balanceBeforeWithdraw = web3.eth.getBalance(TEST_ACCOUNTS.payee).toNumber();                
 
-                await contract.withdrawDeposits({from: TEST_ACCOUNTS.payee}).then(() => {
-                    assert.equal(web3.eth.getBalance(TEST_ACCOUNTS.payee).toNumber(), balanceAfterWithdraw);
+                await contract.withdrawDeposits({from: TEST_ACCOUNTS.payee}).then(async (tx) => {
+                    const t = web3.eth.getTransaction(tx.receipt.transactionHash);
+                    const depositedAmount = transaction.amount.toNumber();
+                    const currentBalance = await (web3.eth.getBalance(TEST_ACCOUNTS.payee)).toNumber();
+                    const balanceAfterWithdraw = (depositedAmount + balanceBeforeWithdraw) - t.gasPrice.mul(tx.receipt.gasUsed).toNumber();
+                    
+                    assert.equal(currentBalance, balanceAfterWithdraw);
                 });
             }); 
         });

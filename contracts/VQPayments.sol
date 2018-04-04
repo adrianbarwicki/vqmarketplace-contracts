@@ -499,9 +499,10 @@ contract VQPayments
         //onlyFreeUser
     {
         uint amount = Deposits[msg.sender];
+
         Deposits[msg.sender] = 0;
         if (!msg.sender.send(amount)) {
-            Deposits[msg.sender] = amount;
+            Deposits[msg.sender] = amount;   
         }
             
     }
