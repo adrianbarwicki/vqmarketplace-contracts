@@ -1,0 +1,175 @@
+pragma solidity ^0.4.17;
+
+contract VQDisputes
+{       
+    //@todo
+    //check fee calculation formula
+    //expireDate: this either requires a polling from outside or poor man's cron
+    //like every function runs the job but this will mean that it will constantly require someone accessing contract
+    //otherwise it does not get executed and the money stays non-expired state even though the time has already passed
+    
+    address public owner;
+
+    modifier onlyOwner() {
+        require(msg.sender == owner);
+        _;
+    }
+
+    modifier onlyPayer(uint txID) {
+        require(msg.sender == PayerRegistry[msg.sender][txID].payer);
+        _;
+    }
+
+    modifier onlyPayee(uint txID) {
+        require(PayeeRegistry[msg.sender][txID].tx_index > 0);
+        _;
+    }
+
+    modifier onlyManager() {
+        require(ManagerRegistry[msg.sender].exists);
+        _;
+    }
+
+    modifier onlyWhen(bool _condition) {
+        require(_condition);
+        _;
+    }
+
+    modifier onlyFreeUser() {
+        require(LockedUserRegistry[msg.sender] == false);
+        _;
+    }
+
+    modifier onlyFreeTransaction(address user, uint txID) {
+        require(PayerRegistry[user][txID].is_locked == false);
+        _;
+    }
+
+    modifier hasDeposit() {
+        require(checkBalance(msg.sender) > 0);
+        _;
+    }
+
+    //these are placeholders for expiry functionality of transactions
+    //modifier onlyBefore(uint _time) { require(now < _time); _; }
+    //modifier onlyAfter(uint _time) { require(now > _time); _; }
+
+    struct Manager
+    {
+        uint fee;
+        bool exists;
+    }
+
+    mapping(address => Transaction[]) public PayerRegistry;
+    mapping(address => TransactionReference[]) public PayeeRegistry;        
+    mapping(address => TransactionReference[]) public TransactionRegistry;
+    mapping(address => Manager) public ManagerRegistry;
+    mapping(address => bool) public LockedUserRegistry;
+    mapping(address => uint) public Deposits;
+
+    function VQDisputes() public
+    {
+        owner = msg.sender;
+    }
+
+    function addManager(
+        address manager,
+        uint fee
+    )
+        public
+        onlyOwner
+        onlyWhen(fee >= 1 && fee <= 100)
+    {
+        ManagerRegistry[manager].fee = fee;
+        ManagerRegistry[manager].exists = true;
+    }
+
+    function setManagerFee(
+        uint fee
+    )
+        public
+        onlyWhen(fee >= 1 && fee <= 100)
+        onlyManager
+    {
+        ManagerRegistry[msg.sender].fee = fee;
+    }
+
+    function getManagerFee(
+        address manager
+    )
+        public
+        view
+        returns (
+            uint
+        ) 
+    {
+        return ManagerRegistry[manager].fee;
+    }
+
+    function createDispute(
+        uint userType,
+        uint txID
+    )
+        public
+    {
+        address payer;
+        uint _txID; //transaction txID of in payer's audit
+        if (userType == 0) // payer
+        {
+            payer = msg.sender;
+            _txID = txID;
+        }
+        else if (userType == 1) //payee
+        {
+            payer = PayeeRegistry[msg.sender][txID].payer;
+            _txID = PayeeRegistry[msg.sender][txID].tx_index;
+        }
+
+        require(
+            PayerRegistry[payer][_txID].has_dispute == false  &&
+            PayerRegistry[payer][_txID].paid == false &&
+            PayerRegistry[payer][_txID].refunded == false &&
+            PayerRegistry[payer][_txID].is_locked == false
+        );
+
+        PayerRegistry[payer][_txID].has_dispute = true;
+    }
+    
+    function concludeDispute(
+        uint txID,
+        uint decision
+    ) public
+    {
+        address payer = TransactionRegistry[msg.sender][txID].payer;
+        uint _txID = TransactionRegistry[msg.sender][txID].tx_index;
+        
+        require(
+            LockedUserRegistry[payer] == false &&
+            LockedUserRegistry[msg.sender] == false &&
+            PayerRegistry[payer][_txID].is_accepted == true &&
+            PayerRegistry[payer][_txID].paid == false &&
+            PayerRegistry[payer][_txID].has_dispute == true &&
+            PayerRegistry[payer][_txID].refunded == false &&
+            PayerRegistry[payer][_txID].is_locked == false &&
+            PayerRegistry[payer][_txID].is_cancelled == false
+        );
+        
+        uint manager_fee = PayerRegistry[payer][_txID].manager_fee;
+        uint amount = PayerRegistry[payer][_txID].amount;
+
+        if (decision == 0) //Refund payer
+        {
+            PayerRegistry[payer][_txID].refunded = true;    
+            Deposits[payer] += amount;
+            Deposits[msg.sender] += manager_fee;
+            
+        }
+        else if (decision == 1) //Release funds to payee
+        {                
+            PayerRegistry[payer][_txID].paid = true;
+            Deposits[PayerRegistry[payer][_txID].payee] += amount;
+            Deposits[msg.sender] += manager_fee;
+        }  
+    }
+    
+}

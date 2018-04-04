@@ -7,10 +7,14 @@ contract VQPayments
     //expireDate: this either requires a polling from outside or poor man's cron
     //like every function runs the job but this will mean that it will constantly require someone accessing contract
     //otherwise it does not get executed and the money stays non-expired state even though the time has already passed
+
+    //KEEP IN MIND
+    //16 variable limit on functions
+    //large contract size causing out of gas error to always refactor
     
     address public owner;
 
-    modifier onlyOwner() {
+    /*modifier onlyOwner() {
         require(msg.sender == owner);
         _;
     }
@@ -22,11 +26,6 @@ contract VQPayments
 
     modifier onlyPayee(uint txID) {
         require(PayeeRegistry[msg.sender][txID].tx_index > 0);
-        _;
-    }
-
-    modifier onlyManager() {
-        require(ManagerRegistry[msg.sender].exists);
         _;
     }
 
@@ -46,13 +45,17 @@ contract VQPayments
     }
 
     modifier hasDeposit() {
-        require(checkBalance(msg.sender) > 0);
+        require(Deposits[msg.sender] > 0);
         _;
-    }
+    } */
 
     //these are placeholders for expiry functionality of transactions
     //modifier onlyBefore(uint _time) { require(now < _time); _; }
     //modifier onlyAfter(uint _time) { require(now > _time); _; }
+
+    event Logger (
+        bytes32 value
+    );
 
     struct Transaction
     {    
@@ -60,8 +63,6 @@ contract VQPayments
         address payee;
         address manager;
 
-        //todo remove                            
-        uint manager_fee;
         uint amount;
 
         bool is_accepted;
@@ -80,56 +81,15 @@ contract VQPayments
         uint tx_index;
     }
 
-    struct Manager
-    {
-        uint fee;
-        bool exists;
-    }
-
     mapping(address => Transaction[]) public PayerRegistry;
     mapping(address => TransactionReference[]) public PayeeRegistry;        
     mapping(address => TransactionReference[]) public TransactionRegistry;
-    mapping(address => Manager) public ManagerRegistry;
     mapping(address => bool) public LockedUserRegistry;
     mapping(address => uint) public Deposits;
 
     function VQPayments() public
     {
         owner = msg.sender;
-    }
-
-    function addManager(
-        address manager,
-        uint fee
-    )
-        public
-        onlyOwner
-        onlyWhen(fee >= 1 && fee <= 100)
-    {
-        ManagerRegistry[manager].fee = fee;
-        ManagerRegistry[manager].exists = true;
-    }
-
-    function setManagerFee(
-        uint fee
-    )
-        public
-        onlyWhen(fee >= 1 && fee <= 100)
-        onlyManager
-    {
-        ManagerRegistry[msg.sender].fee = fee;
-    }
-
-    function getManagerFee(
-        address manager
-    )
-        public
-        view
-        returns (
-            uint
-        ) 
-    {
-        return ManagerRegistry[manager].fee;
     }
 
     function createTransaction(
@@ -139,8 +99,8 @@ contract VQPayments
     )
         public
         payable
-        onlyFreeUser
-        onlyWhen(msg.value > 0)
+        //onlyFreeUser
+        //onlyWhen(msg.value > 0)
         returns (
             bool
         )
@@ -170,8 +130,8 @@ contract VQPayments
         uint txID
     )
         public
-        onlyFreeUser
-        onlyPayee(txID)
+        //onlyFreeUser
+        //onlyPayee(txID)
         returns (
             bool
         )
@@ -197,8 +157,8 @@ contract VQPayments
         uint txID
     )
         public
-        onlyFreeUser
-        onlyPayer(txID)
+        //onlyFreeUser
+        //onlyPayer(txID)
         returns (
             bool
         )
@@ -403,25 +363,25 @@ contract VQPayments
     {
         bytes32 status = "";
 
-        if (PayerRegistry[payer][txID].is_accepted) {
+        if (PayerRegistry[payer][txID].is_accepted == true) {
             status = "Transaction Accepted";
         }
-        else if (PayerRegistry[payer][txID].paid)
+        else if (PayerRegistry[payer][txID].paid == true)
         {
             status = "Paid";
         }
-        else if (PayerRegistry[payer][txID].refunded)
+        else if (PayerRegistry[payer][txID].refunded == true)
         {
             status = "Refunded";
         }
-        else if (PayerRegistry[payer][txID].has_dispute)
+        else if (PayerRegistry[payer][txID].has_dispute == true)
         {
             status = "Awaiting Dispute Resolution";
         }
-        else if (PayerRegistry[payer][txID].is_locked) {
+        else if (PayerRegistry[payer][txID].is_locked == true) {
             status = "Transaction Locked";
         }
-        else if (LockedUserRegistry[payer])
+        else if (LockedUserRegistry[payer] == true)
         {
             status = "User Access Locked";
         }
@@ -434,211 +394,109 @@ contract VQPayments
     }
 
     function setTransactionStatus(
-        address user,
+        address payer,
         uint txID,
         bytes32 attr,
         bool status
     )
         public
-        onlyOwner
+        //onlyOwner
         returns (
             bool
         )
     {
-        address payer = PayeeRegistry[user][txID].payer;
-        uint _txID = PayeeRegistry[user][txID].tx_index;
 
         if (attr == "is_accepted")
         {
-            PayerRegistry[payer][_txID].is_accepted = status;
+            PayerRegistry[payer][txID].is_accepted = status;
         }
         else if (attr == "has_dispute")
         {
-            PayerRegistry[payer][_txID].has_dispute = status;
+            PayerRegistry[payer][txID].has_dispute = status;
         }
         else if (attr == "paid")
         {
-            PayerRegistry[payer][_txID].paid = status;
+            PayerRegistry[payer][txID].paid = status;
         }
         else if (attr == "refunded")
         {
-            PayerRegistry[payer][_txID].refunded = status;
+            PayerRegistry[payer][txID].refunded = status;
         }
         else if (attr == "is_locked")
         {
-            PayerRegistry[payer][_txID].is_locked = status;
+            PayerRegistry[payer][txID].is_locked = status;
         }
         else if (attr == "is_cancelled")
         {
-            PayerRegistry[payer][_txID].is_cancelled = status;
+            PayerRegistry[payer][txID].is_cancelled = status;
         }
         
         return true;
     }
 
     function releaseDeposit(
+        address user,
         uint txID
     )
         public
         payable
-        onlyPayer(txID)
-        onlyFreeUser
-        onlyWhen(txID < PayerRegistry[msg.sender].length)
+        //onlyPayer(txID)
+        //onlyFreeUser
+        //onlyWhen(txID < PayerRegistry[user].length)
     {
         require(
-            PayerRegistry[msg.sender][txID].paid == false &&
-            PayerRegistry[msg.sender][txID].refunded == false &&
-            PayerRegistry[msg.sender][txID].is_locked == false
+            PayerRegistry[user][txID].paid == false &&
+            PayerRegistry[user][txID].refunded == false &&
+            PayerRegistry[user][txID].is_locked == false
         );
         
-        PayerRegistry[msg.sender][txID].paid = true;
+        PayerRegistry[user][txID].paid = true;
 
-        address payee = PayerRegistry[msg.sender][txID].payee;
-        address manager = PayerRegistry[msg.sender][txID].manager;
-
-        uint amount = PayerRegistry[msg.sender][txID].amount;
-        uint manager_fee = PayerRegistry[msg.sender][txID].manager_fee;
+        address payee = PayerRegistry[user][txID].payee;
+        uint amount = PayerRegistry[user][txID].amount;
 
         Deposits[payee] += amount;
-        Deposits[manager] += manager_fee;
     }
 
-    function refundDeposit(
-        uint txID
-    )
-        public
-        payable
-        onlyPayee(txID)
-        onlyFreeUser
-    {
-        address payer = PayeeRegistry[msg.sender][txID].payer;
-        uint _txID = PayeeRegistry[msg.sender][txID].tx_index;
-
-        require(
-            LockedUserRegistry[payer] == false &&
-            PayerRegistry[payer][_txID].paid == false &&
-            PayerRegistry[payer][_txID].refunded == false &&
-            PayerRegistry[payer][_txID].is_locked == false
-        ); 
-
-        address manager = PayerRegistry[payer][_txID].manager;
-        uint manager_fee = PayerRegistry[payer][_txID].manager_fee;
-        uint amount = PayerRegistry[payer][_txID].amount;
-
-        PayerRegistry[payer][_txID].refunded = true;
-
-        Deposits[payer] += amount;
-        Deposits[manager] += manager_fee;
-    }
-
-    function lockUserAccess(
-        address user
-    )
-        public
-        onlyOwner
-    {
-        LockedUserRegistry[user] = true;
-    }
-
-    function lockTransaction(
+    function lockUnlockUserAccess(
         address user,
-        uint txID
+        uint action //0 for locking, 1 for unlocking
     )
         public
-        onlyOwner
+        //onlyOwner
     {
-        PayerRegistry[user][txID].is_locked = true;
+        if (action == 0)
+        {
+            LockedUserRegistry[user] = true;
+        }
+        else if (action == 1)
+        {
+            LockedUserRegistry[user] = false;
+        }
     }
 
-    function unlockUserAccess(
-        address user
-    )
-        public
-        onlyOwner
-    {
-        LockedUserRegistry[user] = false;
-    }
-
-    function unlockTransaction(
+    function lockUnlockTransaction(
         address user,
-        uint txID
-    )
-        public
-        onlyOwner
-    {
-        PayerRegistry[user][txID].is_locked = false;
-    }
-
-    function createDispute(
-        uint userType,
-        uint txID
-    )
-        public
-    {
-        address payer;
-        uint _txID; //transaction txID of in payer's audit
-        if (userType == 0) // payer
-        {
-            payer = msg.sender;
-            _txID = txID;
-        }
-        else if (userType == 1) //payee
-        {
-            payer = PayeeRegistry[msg.sender][txID].payer;
-            _txID = PayeeRegistry[msg.sender][txID].tx_index;
-        }
-
-        require(
-            PayerRegistry[payer][_txID].has_dispute == false  &&
-            PayerRegistry[payer][_txID].paid == false &&
-            PayerRegistry[payer][_txID].refunded == false &&
-            PayerRegistry[payer][_txID].is_locked == false
-        );
-
-        PayerRegistry[payer][_txID].has_dispute = true;
-    }
-    
-    function concludeDispute(
         uint txID,
-        uint decision
-    ) public
+        uint action //0 for locking, 1 for unlocking
+    )
+        public
+        //onlyOwner
     {
-        address payer = TransactionRegistry[msg.sender][txID].payer;
-        uint _txID = TransactionRegistry[msg.sender][txID].tx_index;
-        
-        require(
-            LockedUserRegistry[payer] == false &&
-            LockedUserRegistry[msg.sender] == false &&
-            PayerRegistry[payer][_txID].is_accepted == true &&
-            PayerRegistry[payer][_txID].paid == false &&
-            PayerRegistry[payer][_txID].has_dispute == true &&
-            PayerRegistry[payer][_txID].refunded == false &&
-            PayerRegistry[payer][_txID].is_locked == false &&
-            PayerRegistry[payer][_txID].is_cancelled == false
-        );
-        
-        uint manager_fee = PayerRegistry[payer][_txID].manager_fee;
-        uint amount = PayerRegistry[payer][_txID].amount;
-
-        if (decision == 0) //Refund payer
+        if (action == 0)
         {
-            PayerRegistry[payer][_txID].refunded = true;    
-            Deposits[payer] += amount;
-            Deposits[msg.sender] += manager_fee;
-            
+            PayerRegistry[user][txID].is_locked = true;
         }
-        else if (decision == 1) //Release funds to payee
-        {                
-            PayerRegistry[payer][_txID].paid = true;
-            Deposits[PayerRegistry[payer][_txID].payee] += amount;
-            Deposits[msg.sender] += manager_fee;
-        }  
+        else if (action == 1)
+        {
+            PayerRegistry[user][txID].is_locked = false;
+        }
     }
     
     function withdrawDeposits()
         public
-        hasDeposit
-        onlyFreeUser
+        //hasDeposit
+        //onlyFreeUser
     {
         uint amount = Deposits[msg.sender];
         Deposits[msg.sender] = 0;
@@ -647,19 +505,6 @@ contract VQPayments
         }
             
     }
-
-    function checkBalance(
-        address user
-    )
-        public
-        view
-        returns (
-            uint
-        )
-    {
-        return Deposits[user];
-    }
-
     function getUserTransactionsDetails(
         address user,
         uint offset,
