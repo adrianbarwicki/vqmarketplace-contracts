@@ -1,7 +1,6 @@
 require('babel-register')
 require('babel-polyfill')
 const _ = require('lodash');
-const BigNumber = require('bignumber.js');
 
 //const expectThrow = require('./expectThrow.js');
 //const expectCorrectUser = require('./expectCorrectUser.js');
@@ -21,8 +20,7 @@ contract('VQPayments', async (accounts) => {
     //      check withdraw test, it contains an example on how to correctly calculate
     //      the gas used
 
-
-    let TRANSACTION_STATE = {
+    const TRANSACTION_STATE = {
         is_accepted: "is_accepted",
         has_dispute: "has_dispute",
         paid: "paid",
@@ -31,7 +29,7 @@ contract('VQPayments', async (accounts) => {
         is_cancelled: "is_cancelled"
     };
     
-    let TEST_ACCOUNTS = {
+    const TEST_ACCOUNTS = {
         owner: accounts[0],
         payer: accounts[1],
         payee: accounts[2],
