@@ -48,7 +48,7 @@ contract('VQPayments', async (accounts) => {
 
     describe("Function: createTransaction", () => {
         it("created the transaction", async () => {
-            await contract.createTransaction(
+            const result = await contract.createTransaction(
                 TEST_ACCOUNTS.payee, //payee
                 TEST_ACCOUNTS.manager, //manager
                 web3.toHex("test"), //ref
@@ -56,27 +56,27 @@ contract('VQPayments', async (accounts) => {
                 value: web3.toWei(1, "ether"), //1000000000000000000 wei
                 from: TEST_ACCOUNTS.payer, //payer
                 gas: 1000000
-            }).then(result => {
-                assert.equal(result.receipt.status, 1);
             });
+
+            assert.equal(result.receipt.status, 1);
         });
         
         it("deposited correct amount of money to owner account", async () => {
-            await contract.Deposits(TEST_ACCOUNTS.owner).then((od) => {
-                assert.equal(od, web3.toWei(1, "ether") / 400);
-            });
+            const result = await contract.Deposits(TEST_ACCOUNTS.owner)
+            
+            assert.equal(result, web3.toWei(1, "ether") / 400);
         });
         
         it("added transaction to PayerRegistry", async () => {
-            await contract.payerAudit(TEST_ACCOUNTS.payer, 0, 1).then((pr) => {
-                let payerRegistry = {
-                    payee: pr[0][0],
-                    manager: pr[1][0]
-                };
-                
-                assert.equal(payerRegistry.payee, TEST_ACCOUNTS.payee);
-                assert.equal(payerRegistry.manager, TEST_ACCOUNTS.manager);
-            });
+            const result = await contract.payerAudit(TEST_ACCOUNTS.payer, 0, 1);
+
+            let payerRegistry = {
+                payee: result[0][0],
+                manager: result[1][0]
+            };
+            
+            assert.equal(payerRegistry.payee, TEST_ACCOUNTS.payee);
+            assert.equal(payerRegistry.manager, TEST_ACCOUNTS.manager);
         });
         
         it("added transaction to PayeeRegistry", async () => {
