@@ -1,4 +1,4 @@
-pragma solidity ^0.4.17;
+pragma solidity ^0.4.2;
 
 contract VQPayments
 {       
@@ -13,6 +13,7 @@ contract VQPayments
     //large contract size causing out of gas error so always refactor
     
     address public owner;
+    bool public is_frozen;
 
     modifier onlyOwner()
     {
@@ -35,18 +36,6 @@ contract VQPayments
     modifier onlyWhen(bool condition)
     {
         require(condition);
-        _;
-    }
-
-    modifier onlyFreeUser()
-    {
-        require(LockedUserRegistry[msg.sender] == false);
-        _;
-    }
-
-    modifier onlyFreeTransaction(address user, uint txID)
-    {
-        require(PayerRegistry[user][txID].is_locked == false);
         _;
     }
 
@@ -78,12 +67,6 @@ contract VQPayments
         CANCELLED
     }
 
-    enum AccessAction
-    {
-        LOCK,
-        UNLOCK
-    }
-
     enum UserType
     {
         PAYER,
@@ -99,7 +82,6 @@ contract VQPayments
         uint amount;
 
         TransactionStatus status;
-        bool is_locked;
 
         bytes32 ref;
     }
@@ -112,7 +94,6 @@ contract VQPayments
 
     mapping(address => Transaction[]) public PayerRegistry;
     mapping(address => TransactionReference[]) public PayeeRegistry;        
-    mapping(address => bool) public LockedUserRegistry;
     mapping(address => uint) public Deposits;
 
     function VQPayments() public
@@ -127,7 +108,7 @@ contract VQPayments
     )
         public
         payable
-        onlyFreeUser
+        onlyWhen(is_frozen == false)
         onlyWhen(msg.value > 0)
         returns (
             bool
@@ -143,7 +124,6 @@ contract VQPayments
         blankTransaction.manager = manager;
         blankTransaction.amount = msg.value - (msg.value/400);
         blankTransaction.status = TransactionStatus.PENDING;
-        blankTransaction.is_locked = false;
         blankTransaction.ref = ref;
 
         blankTransactionReference.payer = msg.sender;
@@ -159,7 +139,6 @@ contract VQPayments
         uint txID
     )
         public
-        onlyFreeUser
         onlyPayee(txID)
         onlyWhen(PayerRegistry[PayeeRegistry[msg.sender][txID].payer][txID].status == TransactionStatus.PENDING)
         returns (
@@ -179,7 +158,6 @@ contract VQPayments
         uint txID
     )
         public
-        onlyFreeUser
         onlyPayer(txID)
         onlyWhen(PayerRegistry[msg.sender][txID].status == TransactionStatus.PENDING)
         returns (
@@ -228,7 +206,6 @@ contract VQPayments
             address,
             uint,
             bytes32,
-            bool,
             bytes32
         )
     {
@@ -255,7 +232,6 @@ contract VQPayments
             currentTransaction.manager,
             currentTransaction.amount,
             status,
-            currentTransaction.is_locked,
             currentTransaction.ref
         );
     }   
@@ -274,7 +250,6 @@ contract VQPayments
             address[],
             uint[],
             bytes32[],
-            bool[],
             bytes32[]
         )
     {
@@ -285,7 +260,6 @@ contract VQPayments
         address[] memory managers = new address[](count);
         uint[] memory amounts = new uint[](count);
         bytes32[] memory statuses = new bytes32[](count);
-        bool[] memory is_lockeds = new bool[](count);
         bytes32[] memory refs = new bytes32[](count);
 
         if (userType == 0)
@@ -306,7 +280,6 @@ contract VQPayments
                 managers[i] = PayerRegistry[user][offset + i].manager;
                 amounts[i] = PayerRegistry[user][offset + i].amount;
                 statuses[i] = getTransactionStatus(user, offset + i);
-                is_lockeds[i] = PayerRegistry[user][offset + i].is_locked;
                 refs[i] = PayerRegistry[user][offset + i].ref;
             }
         } 
@@ -351,12 +324,6 @@ contract VQPayments
 
                 statuses[j] = getTransactionStatus(PayeeRegistry[user][offset + j].payer, PayeeRegistry[user][offset + j].tx_index);
 
-                is_lockeds[j] = PayerRegistry[
-                    PayeeRegistry[user][offset + j].payer
-                ][
-                    PayeeRegistry[user][offset + j].tx_index
-                ].is_locked;
-
                 refs[j] = PayerRegistry[
                     PayeeRegistry[user][offset + j].payer
                 ][
@@ -372,7 +339,6 @@ contract VQPayments
             managers,
             amounts,
             statuses,
-            is_lockeds,
             refs
         );
     } */
@@ -389,15 +355,7 @@ contract VQPayments
     {
         bytes32 status = "";
 
-        if (LockedUserRegistry[payer] == true)
-        {
-            status = "User Access Locked";
-        }
-        else if (PayerRegistry[payer][txID].is_locked == true)
-        {
-            status = "Locked";
-        }
-        else if (PayerRegistry[payer][txID].status == TransactionStatus.PENDING)
+        if (PayerRegistry[payer][txID].status == TransactionStatus.PENDING)
         {
             status = "Pending";
         }
@@ -432,7 +390,6 @@ contract VQPayments
         public
         payable
         onlyPayer(txID)
-        onlyFreeUser
         onlyWhen(txID < PayerRegistry[user].length)
         onlyWhen(PayerRegistry[msg.sender][txID].status == TransactionStatus.ACCEPTED)
     {       
@@ -444,53 +401,18 @@ contract VQPayments
         Deposits[payee] += amount;
     }
 
-    function lockUnlockUserAccess(
-        address user,
-        AccessAction action      
-    )
+    function freezeContract()
         public
         onlyOwner
-        returns (
-            bool
-        )
     {
-        if (action == AccessAction.LOCK)
-        {
-            LockedUserRegistry[user] = true;
-        }
-        else if (action == AccessAction.UNLOCK)
-        {
-            LockedUserRegistry[user] = false;
-        }
-        return true;
+        is_frozen = true;
     }
 
-    function lockUnlockTransaction(
-        address payer,
-        uint txID,
-        AccessAction action
-    )
-        public
-        onlyOwner
-        returns (
-            bool
-        )
-    {
-        if (action == AccessAction.LOCK)
-        {
-            PayerRegistry[payer][txID].is_locked = true;
-        }
-        else if (action == AccessAction.UNLOCK)
-        {
-            PayerRegistry[payer][txID].is_locked = false;
-        }
-        return true;
-    }
+    
     
     function withdrawDeposits()
         public
         hasDeposit
-        onlyFreeUser
     {
         uint amount = Deposits[msg.sender];
 

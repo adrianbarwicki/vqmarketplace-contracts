@@ -34,11 +34,6 @@ contract('VQPayments', async (accounts) => {
         REFUNDED: 4,
         CANCELLED: 5,
     };
-
-    const ACCESS_ACTION = {
-        LOCK: 0,
-        UNLOCK: 1,
-    };
     
     const USER_TYPES = {
         PAYER: 0,
@@ -49,10 +44,7 @@ contract('VQPayments', async (accounts) => {
         OWNER: accounts[0],
         PAYER: accounts[1],
         PAYEE: accounts[2],
-        MANAGER: accounts[3],
-        LOCKED_USER: accounts[4],
-        LOCKED_USER_2: accounts[5],
-        LOCKED_USER_3: accounts[6],
+        MANAGER: accounts[3]
     };
 
     const TRANSACTION_STATUS = {
@@ -62,8 +54,6 @@ contract('VQPayments', async (accounts) => {
         PAID: "Paid",
         REFUNDED: "Refunded",
         DISPUTED: "Awaiting Dispute Resolution",
-        LOCKED: "Locked",
-        USER_LOCKED: "User Access Locked",
 
     }
 
@@ -73,7 +63,6 @@ contract('VQPayments', async (accounts) => {
         MANAGER: TEST_ACCOUNTS.MANAGER,
         AMOUNT: web3.toWei(1, "ether"),
         STATUS: TRANSACTION_STATE.PENDING,
-        IS_LOCKED: false,
         REF: "test",
     }
 
@@ -135,8 +124,7 @@ contract('VQPayments', async (accounts) => {
                     manager: result[2],
                     amount: result[3].toNumber(),
                     status: result[4],
-                    is_locked: result[5],
-                    ref: result[6],
+                    ref: result[5],
                 };
                 
                 assert.equal(transactionRef.payer, TRANSACTION_MOCK.PAYER);
@@ -144,7 +132,6 @@ contract('VQPayments', async (accounts) => {
                 assert.equal(transactionRef.manager, TRANSACTION_MOCK.MANAGER);
                 assert.equal(transactionRef.amount, deductOwnerFee(TRANSACTION_MOCK.AMOUNT));
                 assert.equal(transactionRef.status, TRANSACTION_MOCK.STATUS);
-                assert.equal(transactionRef.is_locked, TRANSACTION_MOCK.IS_LOCKED);
                 assert.equal(transactionRef.ref, toHex(TRANSACTION_MOCK.REF));
             });
             
@@ -170,7 +157,6 @@ contract('VQPayments', async (accounts) => {
 
             //only pending state
             //check result status
-            //locked user prohibited
 
             it("prohibited other users than the payee from accepting the transaction", async () => {
                 try {
@@ -196,7 +182,6 @@ contract('VQPayments', async (accounts) => {
 
             //only pending state
             //deposit of payer
-            //locked user prohibited
             //check result status
 
             it("prohibited other users than the payer from cancelling the transaction", async () => {
@@ -251,8 +236,7 @@ contract('VQPayments', async (accounts) => {
                     manager: result[2],
                     amount: result[3].toNumber(),
                     status: result[4],
-                    is_locked: result[5],
-                    ref: result[6],
+                    ref: result[5],
                 };                
                 
                 assert.equal(transactionRef.payer, TRANSACTION_MOCK.PAYER);
@@ -260,7 +244,6 @@ contract('VQPayments', async (accounts) => {
                 assert.equal(transactionRef.manager, TRANSACTION_MOCK.MANAGER);
                 assert.equal(transactionRef.amount, deductOwnerFee(TRANSACTION_MOCK.AMOUNT));
                 assert.equal(transactionRef.status, toHex(TRANSACTION_STATUS.PENDING));
-                assert.equal(transactionRef.is_locked, TRANSACTION_MOCK.IS_LOCKED);
                 assert.equal(transactionRef.ref, toHex(TRANSACTION_MOCK.REF));
             }); 
             
@@ -273,8 +256,7 @@ contract('VQPayments', async (accounts) => {
                     manager: result[2],
                     amount: result[3].toNumber(),
                     status: result[4],
-                    is_locked: result[5],
-                    ref: result[6],
+                    ref: result[5],
                 };   
 
                 assert.equal(transactionRef.payer, TRANSACTION_MOCK.PAYER);
@@ -282,7 +264,6 @@ contract('VQPayments', async (accounts) => {
                 assert.equal(transactionRef.manager, TRANSACTION_MOCK.MANAGER);
                 assert.equal(transactionRef.amount, deductOwnerFee(TRANSACTION_MOCK.AMOUNT));
                 assert.equal(transactionRef.status, toHex(TRANSACTION_STATUS.PENDING));
-                assert.equal(transactionRef.is_locked, TRANSACTION_MOCK.IS_LOCKED);
                 assert.equal(transactionRef.ref, toHex(TRANSACTION_MOCK.REF));
             }); 
         });
@@ -309,23 +290,6 @@ contract('VQPayments', async (accounts) => {
                 const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
                 assert.equal(result, toHex(TRANSACTION_STATUS.CANCELLED));
             });
-
-            it("got Locked status", async () => { 
-                const transaction = await createMockTransaction();
-                await contract.lockUnlockTransaction(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex, ACCESS_ACTION.LOCK, {from: TEST_ACCOUNTS.OWNER});
-    
-                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
-                assert.equal(result, toHex(TRANSACTION_STATUS.LOCKED));
-            });
-
-            it("got User Locked status", async () => { 
-                const transaction = await createMockTransaction(TEST_ACCOUNTS.LOCKED_USER);
-                await contract.lockUnlockUserAccess(TEST_ACCOUNTS.LOCKED_USER, ACCESS_ACTION.LOCK, {from: TEST_ACCOUNTS.OWNER});
-                
-                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.LOCKED_USER, transaction.lastTransactionIndex);
-                
-                assert.equal(result, toHex(TRANSACTION_STATUS.USER_LOCKED));
-            });
          
             //PAID
             //REFUNDED
@@ -333,38 +297,18 @@ contract('VQPayments', async (accounts) => {
 
         });
 
-        describe("Function: lockUnlockUserAccess", () => {
+        describe("Function: freezeContract", () => {
             //only owner
             //no other user
-            //user access locked status
-            //user access unlocked status
 
-            it("locked the user", async () => { 
-                const transaction = await createMockTransaction(TEST_ACCOUNTS.LOCKED_USER_2);
-                await contract.lockUnlockUserAccess(TEST_ACCOUNTS.LOCKED_USER_2, ACCESS_ACTION.LOCK, {from: TEST_ACCOUNTS.OWNER});
+            it("frozen the contract which blocks createTransaction", async () => { 
+                await contract.freezeContract({from: TEST_ACCOUNTS.OWNER});
+                const transaction = await createMockTransaction();
+                console.log(transaction)
                 
-                const result = await contract.LockedUserRegistry(TEST_ACCOUNTS.LOCKED_USER_2);
-                
-                assert.isTrue(result);
+                //assert.isTrue(result);
             });
         });     
-
-        describe("Function: lockUnlockTransaction", () => {
-            //only owner
-            //no other user
-            //locked status
-            //unlocked status
-
-            it("locked the transaction", async () => { 
-                const transaction = await createMockTransaction();
-
-                await contract.lockUnlockTransaction(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex, ACCESS_ACTION.LOCK, {from: TEST_ACCOUNTS.OWNER});
-    
-                //const result = await contract.PayerRegistry(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
-                //console.log('res', result);
-                //assert.equal(result.is_locked);
-            });
-        });
 
         /* describe("Functions: releaseDeposit & withdrawDeposits", () => {
             it("releaseDeposit released the deposit to payee's Deposit", async () => {
