@@ -10,52 +10,85 @@ contract VQPayments
 
     //KEEP IN MIND
     //16 variable limit on functions
-    //large contract size causing out of gas error to always refactor
+    //large contract size causing out of gas error so always refactor
     
     address public owner;
 
-    /*modifier onlyOwner() {
+    modifier onlyOwner()
+    {
         require(msg.sender == owner);
         _;
     }
 
-    modifier onlyPayer(uint txID) {
+    modifier onlyPayer(uint txID)
+    {
         require(msg.sender == PayerRegistry[msg.sender][txID].payer);
         _;
     }
 
-    modifier onlyPayee(uint txID) {
+    modifier onlyPayee(uint txID)
+    {
         require(PayeeRegistry[msg.sender][txID].tx_index > 0);
         _;
     }
 
-    modifier onlyWhen(bool _condition) {
-        require(_condition);
+    modifier onlyWhen(bool condition)
+    {
+        require(condition);
         _;
     }
 
-    modifier onlyFreeUser() {
+    modifier onlyFreeUser()
+    {
         require(LockedUserRegistry[msg.sender] == false);
         _;
     }
 
-    modifier onlyFreeTransaction(address user, uint txID) {
+    modifier onlyFreeTransaction(address user, uint txID)
+    {
         require(PayerRegistry[user][txID].is_locked == false);
         _;
     }
 
-    modifier hasDeposit() {
+    modifier hasDeposit()
+    {
         require(Deposits[msg.sender] > 0);
         _;
-    } */
+    } 
+    
+    modifier onlyBefore(uint time)
+    {
+        require(now < time);
+        _;
+    }
 
-    //these are placeholders for expiry functionality of transactions
-    //modifier onlyBefore(uint _time) { require(now < _time); _; }
-    //modifier onlyAfter(uint _time) { require(now > _time); _; }
+    modifier onlyAfter(uint time)
+    {
+        require(now > time);
+        _;
+    }
 
-    event Logger (
-        bytes32 value
-    );
+    enum TransactionStatus
+    {
+        PENDING,
+        ACCEPTED,
+        DISPUTED,
+        PAID,
+        REFUNDED,
+        CANCELLED
+    }
+
+    enum AccessAction
+    {
+        LOCK,
+        UNLOCK
+    }
+
+    enum UserType
+    {
+        PAYER,
+        PAYEE
+    }
 
     struct Transaction
     {    
@@ -65,12 +98,8 @@ contract VQPayments
 
         uint amount;
 
-        bool is_accepted;
-        bool has_dispute;
-        bool paid;
-        bool refunded;
+        TransactionStatus status;
         bool is_locked;
-        bool is_cancelled;
 
         bytes32 ref;
     }
@@ -83,7 +112,6 @@ contract VQPayments
 
     mapping(address => Transaction[]) public PayerRegistry;
     mapping(address => TransactionReference[]) public PayeeRegistry;        
-    mapping(address => TransactionReference[]) public TransactionRegistry;
     mapping(address => bool) public LockedUserRegistry;
     mapping(address => uint) public Deposits;
 
@@ -99,8 +127,8 @@ contract VQPayments
     )
         public
         payable
-        //onlyFreeUser
-        //onlyWhen(msg.value > 0)
+        onlyFreeUser
+        onlyWhen(msg.value > 0)
         returns (
             bool
         )
@@ -114,6 +142,8 @@ contract VQPayments
         blankTransaction.payee = payee;
         blankTransaction.manager = manager;
         blankTransaction.amount = msg.value - (msg.value/400);
+        blankTransaction.status = TransactionStatus.PENDING;
+        blankTransaction.is_locked = false;
         blankTransaction.ref = ref;
 
         blankTransactionReference.payer = msg.sender;
@@ -121,7 +151,6 @@ contract VQPayments
 
         PayerRegistry[msg.sender].push(blankTransaction);
         PayeeRegistry[payee].push(blankTransactionReference);
-        TransactionRegistry[msg.sender].push(blankTransactionReference);
         
         return true;
     }
@@ -130,8 +159,9 @@ contract VQPayments
         uint txID
     )
         public
-        //onlyFreeUser
-        //onlyPayee(txID)
+        onlyFreeUser
+        onlyPayee(txID)
+        onlyWhen(PayerRegistry[PayeeRegistry[msg.sender][txID].payer][txID].status == TransactionStatus.PENDING)
         returns (
             bool
         )
@@ -140,16 +170,8 @@ contract VQPayments
         uint _txID = PayeeRegistry[msg.sender][txID].tx_index;
         Transaction storage currentTransaction = PayerRegistry[payer][_txID];
 
-        require(
-            currentTransaction.is_accepted == false &&
-            currentTransaction.has_dispute == false &&
-            currentTransaction.paid == false &&
-            currentTransaction.refunded == false &&
-            currentTransaction.is_locked == false &&
-            currentTransaction.is_cancelled == false
-        );
+        currentTransaction.status = TransactionStatus.ACCEPTED;
 
-        currentTransaction.is_accepted = true;
         return true;
     }
 
@@ -157,25 +179,16 @@ contract VQPayments
         uint txID
     )
         public
-        //onlyFreeUser
-        //onlyPayer(txID)
+        onlyFreeUser
+        onlyPayer(txID)
+        onlyWhen(PayerRegistry[msg.sender][txID].status == TransactionStatus.PENDING)
         returns (
             bool
         )
     {
-        Transaction memory currentTransaction = PayerRegistry[msg.sender][txID];
+        Transaction storage currentTransaction = PayerRegistry[msg.sender][txID];
 
-        require(
-            currentTransaction.is_accepted == false &&
-            currentTransaction.has_dispute == false &&
-            currentTransaction.paid == false &&
-            currentTransaction.refunded == false &&
-            currentTransaction.is_locked == false &&
-            currentTransaction.is_cancelled == false
-        );
-
-        currentTransaction.is_cancelled = true;
-        currentTransaction.refunded = true;
+        currentTransaction.status = TransactionStatus.CANCELLED;
         
         Deposits[currentTransaction.payer] += currentTransaction.amount;
 
@@ -200,7 +213,6 @@ contract VQPayments
         {
             return PayeeRegistry[user].length;
         }
-        return TransactionRegistry[user].length;
     }
 
     function getUserTransactionByID(
@@ -216,6 +228,7 @@ contract VQPayments
             address,
             uint,
             bytes32,
+            bool,
             bytes32
         )
     {
@@ -228,14 +241,13 @@ contract VQPayments
         } 
         else if (userType == 1)
         {  
-            currentTransaction = PayerRegistry[PayeeRegistry[user][txID].payer][PayeeRegistry[user][txID].tx_index];
+            currentTransaction = PayerRegistry[
+                PayeeRegistry[user][txID].payer
+            ][
+                PayeeRegistry[user][txID].tx_index
+            ];
             status = getTransactionStatus(currentTransaction.payer, PayeeRegistry[user][txID].tx_index);
         }   
-        else if (userType == 2)
-        {        
-            currentTransaction = PayerRegistry[TransactionRegistry[user][txID].payer][TransactionRegistry[user][txID].tx_index];
-            status = getTransactionStatus(currentTransaction.payer, TransactionRegistry[user][txID].tx_index);
-        }
 
         return (
             currentTransaction.payer,
@@ -243,12 +255,14 @@ contract VQPayments
             currentTransaction.manager,
             currentTransaction.amount,
             status,
+            currentTransaction.is_locked,
             currentTransaction.ref
         );
     }   
 
-    function payerAudit(
-        address payer,
+    /* function getAllUserTransactions(
+        address user,
+        uint userType,
         uint offset,
         uint limit
     )
@@ -256,100 +270,112 @@ contract VQPayments
         view
         returns (
             address[],
-            address[]
+            address[], 
+            address[],
+            uint[],
+            bytes32[],
+            bool[],
+            bytes32[]
         )
     {
         uint count;
 
-        if (PayerRegistry[payer].length < limit)
-        {
-            count = PayerRegistry[payer].length;
-        }
-        else
-        {
-            count = limit;
-        }
-        
+        address[] memory payers = new address[](count);
         address[] memory payees = new address[](count);
         address[] memory managers = new address[](count);
-        
-        for (uint i = 0; i < count; i++)
-        {
-            payees[i] = (PayerRegistry[payer][offset + i].payee);
-            managers[i] = (PayerRegistry[payer][offset + i].manager);
-        }
-        
-        return (
-            payees,
-            managers
-        );
-    }
-                
-    function payeeAudit(
-        address user,
-        uint offset,
-        uint limit
-    )
-        public
-        view
-        returns (
-            address[],
-            address[]
-        )
-    {
-        address[] memory payers = new address[](limit);
-        address[] memory managers = new address[](limit);
+        uint[] memory amounts = new uint[](count);
+        bytes32[] memory statuses = new bytes32[](count);
+        bool[] memory is_lockeds = new bool[](count);
+        bytes32[] memory refs = new bytes32[](count);
 
-        for (uint i = 0; i < limit; i++)
+        if (userType == 0)
         {
-            if (i >= PayeeRegistry[user].length)
+            if (PayerRegistry[user].length < limit)
             {
-                break;
+                count = PayerRegistry[user].length;
             }
-                
-            payers[i] = PayeeRegistry[user][offset + i].payer;
-            managers[i] = PayerRegistry[payers[i]][PayeeRegistry[user][offset + i].tx_index].manager;
-        }
-        return (
-            payers,
-            managers
-        );
-    }
-
-    function transactionAudit(
-        address user,
-        uint offset,
-        uint limit
-    )
-        public
-        view
-        returns (
-            address[],
-            address[],
-            address[]
-        )
-    {
-        address[] memory payers = new address[](limit);
-        address[] memory payees = new address[](limit);
-        address[] memory managers = new address[](limit);
-
-        for (uint i = 0; i < limit; i++)
-        {
-            if (i >= TransactionRegistry[user].length)
+            else
             {
-                break;
+                count = limit;
             }
 
-            payers[i] = TransactionRegistry[user][offset + i].payer;
-            payees[i] = PayerRegistry[payers[i]][TransactionRegistry[user][offset + i].tx_index].payee;
-            managers[i] = PayerRegistry[payers[i]][TransactionRegistry[user][offset + i].tx_index].manager;
-        }
+            for (uint i = 0; i < count; i++)
+            {
+                payers[i] = PayerRegistry[user][offset + i].payer;
+                payees[i] = PayerRegistry[user][offset + i].payee;
+                managers[i] = PayerRegistry[user][offset + i].manager;
+                amounts[i] = PayerRegistry[user][offset + i].amount;
+                statuses[i] = getTransactionStatus(user, offset + i);
+                is_lockeds[i] = PayerRegistry[user][offset + i].is_locked;
+                refs[i] = PayerRegistry[user][offset + i].ref;
+            }
+        } 
+        else if (userType == 1)
+        {
+            if (
+                PayeeRegistry[user].length < limit
+            )
+            {
+                count = PayeeRegistry[user].length;
+            }
+            else
+            {
+                count = limit;
+            }
+
+            for (uint j = 0; j < count; j++)
+            {
+                payers[j] = PayerRegistry[
+                    PayeeRegistry[user][offset + j].payer
+                ][
+                    PayeeRegistry[user][offset + j].tx_index
+                ].payer;
+
+                payees[j] = PayerRegistry[
+                    PayeeRegistry[user][offset + j].payer
+                ][
+                    PayeeRegistry[user][offset + j].tx_index
+                ].payee;
+
+                managers[j] = PayerRegistry[
+                    PayeeRegistry[user][offset + j].payer
+                ][
+                    PayeeRegistry[user][offset + j].tx_index
+                ].manager;
+
+                amounts[j] = PayerRegistry[
+                    PayeeRegistry[user][offset + j].payer
+                ][
+                    PayeeRegistry[user][offset + j].tx_index
+                ].amount;
+
+                statuses[j] = getTransactionStatus(PayeeRegistry[user][offset + j].payer, PayeeRegistry[user][offset + j].tx_index);
+
+                is_lockeds[j] = PayerRegistry[
+                    PayeeRegistry[user][offset + j].payer
+                ][
+                    PayeeRegistry[user][offset + j].tx_index
+                ].is_locked;
+
+                refs[j] = PayerRegistry[
+                    PayeeRegistry[user][offset + j].payer
+                ][
+                    PayeeRegistry[user][offset + j].tx_index
+                ].ref;
+            }
+        }   
+        
+        
         return (
             payers,
             payees,
-            managers
+            managers,
+            amounts,
+            statuses,
+            is_lockeds,
+            refs
         );
-    }
+    } */
 
     function getTransactionStatus(
         address payer,
@@ -363,75 +389,40 @@ contract VQPayments
     {
         bytes32 status = "";
 
-        if (PayerRegistry[payer][txID].is_accepted == true) {
-            status = "Transaction Accepted";
-        }
-        else if (PayerRegistry[payer][txID].paid == true)
-        {
-            status = "Paid";
-        }
-        else if (PayerRegistry[payer][txID].refunded == true)
-        {
-            status = "Refunded";
-        }
-        else if (PayerRegistry[payer][txID].has_dispute == true)
-        {
-            status = "Awaiting Dispute Resolution";
-        }
-        else if (PayerRegistry[payer][txID].is_locked == true) {
-            status = "Transaction Locked";
-        }
-        else if (LockedUserRegistry[payer] == true)
+        if (LockedUserRegistry[payer] == true)
         {
             status = "User Access Locked";
         }
-        else
+        else if (PayerRegistry[payer][txID].is_locked == true)
         {
-            status = "In Progress";
+            status = "Locked";
         }
-    
-        return status;
-    }
-
-    function setTransactionStatus(
-        address payer,
-        uint txID,
-        bytes32 attr,
-        bool status
-    )
-        public
-        //onlyOwner
-        returns (
-            bool
-        )
-    {
-
-        if (attr == "is_accepted")
+        else if (PayerRegistry[payer][txID].status == TransactionStatus.PENDING)
         {
-            PayerRegistry[payer][txID].is_accepted = status;
+            status = "Pending";
         }
-        else if (attr == "has_dispute")
+        else if (PayerRegistry[payer][txID].status == TransactionStatus.ACCEPTED)
         {
-            PayerRegistry[payer][txID].has_dispute = status;
+            status = "Accepted";
         }
-        else if (attr == "paid")
+        else if (PayerRegistry[payer][txID].status == TransactionStatus.CANCELLED)
         {
-            PayerRegistry[payer][txID].paid = status;
+            status = "Cancelled";
         }
-        else if (attr == "refunded")
+        else if (PayerRegistry[payer][txID].status == TransactionStatus.PAID)
         {
-            PayerRegistry[payer][txID].refunded = status;
+            status = "Paid";
         }
-        else if (attr == "is_locked")
+        else if (PayerRegistry[payer][txID].status == TransactionStatus.REFUNDED)
         {
-            PayerRegistry[payer][txID].is_locked = status;
+            status = "Refunded";
         }
-        else if (attr == "is_cancelled")
+        else if (PayerRegistry[payer][txID].status == TransactionStatus.DISPUTED)
         {
-            PayerRegistry[payer][txID].is_cancelled = status;
+            status = "Awaiting Dispute Resolution";
         }
         
-        return true;
+        return status;
     }
 
     function releaseDeposit(
@@ -440,17 +431,12 @@ contract VQPayments
     )
         public
         payable
-        //onlyPayer(txID)
-        //onlyFreeUser
-        //onlyWhen(txID < PayerRegistry[user].length)
-    {
-        require(
-            PayerRegistry[user][txID].paid == false &&
-            PayerRegistry[user][txID].refunded == false &&
-            PayerRegistry[user][txID].is_locked == false
-        );
-        
-        PayerRegistry[user][txID].paid = true;
+        onlyPayer(txID)
+        onlyFreeUser
+        onlyWhen(txID < PayerRegistry[user].length)
+        onlyWhen(PayerRegistry[msg.sender][txID].status == TransactionStatus.ACCEPTED)
+    {       
+        PayerRegistry[user][txID].status = TransactionStatus.PAID;
 
         address payee = PayerRegistry[user][txID].payee;
         uint amount = PayerRegistry[user][txID].amount;
@@ -460,43 +446,51 @@ contract VQPayments
 
     function lockUnlockUserAccess(
         address user,
-        uint action //0 for locking, 1 for unlocking
+        AccessAction action      
     )
         public
-        //onlyOwner
+        onlyOwner
+        returns (
+            bool
+        )
     {
-        if (action == 0)
+        if (action == AccessAction.LOCK)
         {
             LockedUserRegistry[user] = true;
         }
-        else if (action == 1)
+        else if (action == AccessAction.UNLOCK)
         {
             LockedUserRegistry[user] = false;
         }
+        return true;
     }
 
     function lockUnlockTransaction(
-        address user,
+        address payer,
         uint txID,
-        uint action //0 for locking, 1 for unlocking
+        AccessAction action
     )
         public
-        //onlyOwner
+        onlyOwner
+        returns (
+            bool
+        )
     {
-        if (action == 0)
+        if (action == AccessAction.LOCK)
         {
-            PayerRegistry[user][txID].is_locked = true;
+            PayerRegistry[payer][txID].is_locked = true;
         }
-        else if (action == 1)
+        else if (action == AccessAction.UNLOCK)
         {
-            PayerRegistry[user][txID].is_locked = false;
+            PayerRegistry[payer][txID].is_locked = false;
         }
+        return true;
     }
     
     function withdrawDeposits()
         public
-        //hasDeposit
-        //onlyFreeUser
+        hasDeposit
+        onlyFreeUser
     {
         uint amount = Deposits[msg.sender];
 
@@ -505,46 +499,6 @@ contract VQPayments
             Deposits[msg.sender] = amount;   
         }
             
-    }
-    function getUserTransactionsDetails(
-        address user,
-        uint offset,
-        uint limit
-    )
-        public
-        view
-        returns (
-            uint[],
-            bytes32[],
-            bytes32[]
-        )
-    {
-        uint count;
-
-        if (PayerRegistry[user].length < limit)
-        {
-            count = PayerRegistry[user].length;
-        }
-        else
-        {
-            count = limit;
-        }
-
-        uint[] memory amounts = new uint[](count);
-        bytes32[] memory statuses = new bytes32[](count);
-        bytes32[] memory refs = new bytes32[](count);
-        
-        for (uint i = 0; i < count; i++)
-        {
-            amounts[i] = (PayerRegistry[user][offset + i].amount);
-            statuses[i] = getTransactionStatus(user, offset + i);
-            refs[i] = (PayerRegistry[user][offset + i].ref);
-        }
-        return (
-            amounts,
-            statuses,
-            refs
-        );
     }
     
 }

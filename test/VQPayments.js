@@ -1,9 +1,15 @@
-require('babel-register')
-require('babel-polyfill')
-const _ = require('lodash');
+require('babel-register');
+require('babel-polyfill');
 
-//const expectThrow = require('./expectThrow.js');
-//const expectCorrectUser = require('./expectCorrectUser.js');
+const {
+    toHex,
+    isAllowed,
+    isProhibited,
+    expectError,
+    deductOwnerFee,
+    getOwnerFee,
+    calculateGasUsed
+} = require('../utils');
 
 const VQPayments = artifacts.require('../contracts/VQPayments.sol');
 
@@ -21,20 +27,76 @@ contract('VQPayments', async (accounts) => {
     //      the gas used
 
     const TRANSACTION_STATE = {
-        is_accepted: "is_accepted",
-        has_dispute: "has_dispute",
-        paid: "paid",
-        refunded: "refunded",
-        is_locked: "is_locked",
-        is_cancelled: "is_cancelled"
+        PENDING: 0,
+        ACCEPTED: 1,
+        DISPUTED: 2,
+        PAID: 3,
+        REFUNDED: 4,
+        CANCELLED: 5,
+    };
+
+    const ACCESS_ACTION = {
+        LOCK: 0,
+        UNLOCK: 1,
     };
     
+    const USER_TYPES = {
+        PAYER: 0,
+        PAYEE: 1
+    }
+
     const TEST_ACCOUNTS = {
-        owner: accounts[0],
-        payer: accounts[1],
-        payee: accounts[2],
-        manager: accounts[3]
+        OWNER: accounts[0],
+        PAYER: accounts[1],
+        PAYEE: accounts[2],
+        MANAGER: accounts[3],
+        LOCKED_USER: accounts[4],
+        LOCKED_USER_2: accounts[5],
+        LOCKED_USER_3: accounts[6],
     };
+
+    const TRANSACTION_STATUS = {
+        PENDING: "Pending",
+        ACCEPTED: "Accepted",
+        CANCELLED: "Cancelled",
+        PAID: "Paid",
+        REFUNDED: "Refunded",
+        DISPUTED: "Awaiting Dispute Resolution",
+        LOCKED: "Locked",
+        USER_LOCKED: "User Access Locked",
+
+    }
+
+    const TRANSACTION_MOCK = {
+        PAYER: TEST_ACCOUNTS.PAYER,
+        PAYEE: TEST_ACCOUNTS.PAYEE,
+        MANAGER: TEST_ACCOUNTS.MANAGER,
+        AMOUNT: web3.toWei(1, "ether"),
+        STATUS: TRANSACTION_STATE.PENDING,
+        IS_LOCKED: false,
+        REF: "test",
+    }
+
+    const TRANSACTION_REFERENCE_MOCK = {
+        PAYER: TEST_ACCOUNTS.PAYER,
+        TX_INDEX: (index) => index
+    }
+
+    let lastTransactionIndex = 0;
+
+    const createMockTransaction = async (payer = TRANSACTION_MOCK.PAYER) => {
+        return {
+            transaction: await contract.createTransaction(
+                            TRANSACTION_MOCK.PAYEE,
+                            TRANSACTION_MOCK.MANAGER,
+                            TRANSACTION_MOCK.REF,
+                        {
+                            value: TRANSACTION_MOCK.AMOUNT,
+                            from: payer,
+                        }),
+            lastTransactionIndex: lastTransactionIndex++
+        };
+    }
     
     beforeEach('setup contract for each test', async () => {
         return VQPayments.deployed().then((instance) => {
@@ -43,496 +105,305 @@ contract('VQPayments', async (accounts) => {
     });
     
     it("has the right owner", async () => {
-        assert.equal(await contract.owner(), TEST_ACCOUNTS.owner);
+        assert.equal(await contract.owner(), TEST_ACCOUNTS.OWNER);
     });
 
-    describe("Function: createTransaction", () => {
-        it("created the transaction", async () => {
-            const result = await contract.createTransaction(
-                TEST_ACCOUNTS.payee, //payee
-                TEST_ACCOUNTS.manager, //manager
-                web3.toHex("test"), //ref
-            {
-                value: web3.toWei(1, "ether"), //1000000000000000000 wei
-                from: TEST_ACCOUNTS.payer, //payer
-                gas: 1000000
+    describe("Unit Tests", () => {
+        describe("Function: createTransaction", () => {
+            let transaction;
+
+            before('create a transaction', async () => {
+                transaction = await createMockTransaction();
             });
 
-            assert.equal(result.receipt.status, 1);
-        });
-        
-        it("deposited correct amount of money to owner account", async () => {
-            const result = await contract.Deposits(TEST_ACCOUNTS.owner)
+            it("created the transaction", async () => {   
+                assert.equal(transaction.transaction.receipt.status, 1);
+            });
             
-            assert.equal(result, web3.toWei(1, "ether") / 400);
-        });
-        
-        it("added transaction to PayerRegistry", async () => {
-            const result = await contract.payerAudit(TEST_ACCOUNTS.payer, 0, 1);
-
-            let payerRegistry = {
-                payee: result[0][0],
-                manager: result[1][0]
-            };
+            it("deposited correct amount of money to owner account", async () => {
+                const result = await contract.Deposits(TEST_ACCOUNTS.OWNER)
+                
+                assert.equal(result, getOwnerFee(web3.toWei(1, "ether")));
+            });
             
-            assert.equal(payerRegistry.payee, TEST_ACCOUNTS.payee);
-            assert.equal(payerRegistry.manager, TEST_ACCOUNTS.manager);
-        });
-        
-        it("added transaction to PayeeRegistry", async () => {
-            await contract.payeeAudit(TEST_ACCOUNTS.payee, 0, 5).then((pr) => {
-                let payeeRegistry = {
-                    payer: pr[0][0],
-                    manager: pr[1][0]
+            it("added transaction to PayerRegistry", async () => {
+                const result = await contract.PayerRegistry(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
+    
+                const transactionRef = {
+                    payer: result[0],
+                    payee: result[1],
+                    manager: result[2],
+                    amount: result[3].toNumber(),
+                    status: result[4],
+                    is_locked: result[5],
+                    ref: result[6],
                 };
                 
-                assert.equal(payeeRegistry.payer, TEST_ACCOUNTS.payer);
-                assert.equal(payeeRegistry.manager, TEST_ACCOUNTS.manager);
+                assert.equal(transactionRef.payer, TRANSACTION_MOCK.PAYER);
+                assert.equal(transactionRef.payee, TRANSACTION_MOCK.PAYEE);
+                assert.equal(transactionRef.manager, TRANSACTION_MOCK.MANAGER);
+                assert.equal(transactionRef.amount, deductOwnerFee(TRANSACTION_MOCK.AMOUNT));
+                assert.equal(transactionRef.status, TRANSACTION_MOCK.STATUS);
+                assert.equal(transactionRef.is_locked, TRANSACTION_MOCK.IS_LOCKED);
+                assert.equal(transactionRef.ref, toHex(TRANSACTION_MOCK.REF));
             });
-        });
-        
-        it("added transaction to TransactionRegistry", async () => {
-            await contract.transactionAudit(TEST_ACCOUNTS.payer, 0, 1).then((ta) => {
-                let transactionRegistry = {
-                    payer: ta[0][0],
-                    payee: ta[1][0]
-                };
-                assert.equal(transactionRegistry.payer, TEST_ACCOUNTS.payer);
-                assert.equal(transactionRegistry.payee, TEST_ACCOUNTS.payee);
-            });
-        });
-        
-        it("added transaction with correct details", async () => {
-            await contract.getUserTransactionsDetails(TEST_ACCOUNTS.payer, 0, 1).then((td) => {
-                let payerRegistry = {
-                    amount: td[0][0],
-                    status: td[1][0],
-                    ref: td[2][0]
+            
+            it("added transaction reference to PayeeRegistry", async () => {
+                const result = await contract.PayeeRegistry(TEST_ACCOUNTS.PAYEE, transaction.lastTransactionIndex);
+
+                const transactionRef = {
+                    payer: result[0],
+                    tx_index: result[1]
                 };
                 
-                assert.equal(
-                    payerRegistry.amount.toNumber(),
-                    web3.toWei(1, "ether") -
-                    (web3.toWei(1, "ether") / 400)
-                );
-                assert.equal(payerRegistry.status.toString().replace(/0+$/g, ""), web3.toHex("In Progress"));
-                assert.equal(payerRegistry.ref.toString().replace(/0+$/g, ""), web3.toHex("test"));
+                assert.equal(transactionRef.payer, TRANSACTION_REFERENCE_MOCK.PAYER);
+                assert.equal(transactionRef.tx_index, TRANSACTION_REFERENCE_MOCK.TX_INDEX(transaction.lastTransactionIndex));
             });
-        });
-    });
-        
-    describe("Function: acceptTransaction", () => {
-        // not sure if these are correct, they are semi correct
-        it("prohibited other users from accepting the transaction", async () => {
-            try {
-                await contract.acceptTransaction(0, {from: TEST_ACCOUNTS.manager});
-            } catch (error) {
-                // TODO: Check jump destination to destinguish between a throw
-                //       and an actual invalid jump.
-                const invalidOpcode = error.message.search('invalid opcode') >= 0;
-                // TODO: When we contract A calls contract B, and B throws, instead
-                //       of an 'invalid jump', we get an 'out of gas' error. How do
-                //       we distinguish this from an actual out of gas event? (The
-                //       testrpc log actually show an 'invalid jump' event.)
-                const outOfGas = error.message.search('out of gas') >= 0;
-                const revert = error.message.search('revert') >= 0;
-                assert.isTrue(invalidOpcode && !outOfGas && !revert);
-            }
-            //revert to original state
-            await contract.setTransactionStatus(
-                TEST_ACCOUNTS.payer,
-                0,
-                web3.toHex("is_cancelled"),
-                false,
-                { from: TEST_ACCOUNTS.owner }
-            );
-        });
-        
-        it("allowed payee to accept the transaction when the status is pending", async () => {
-            try {
-                await contract.acceptTransaction(0, {from: TEST_ACCOUNTS.payee});
-            } catch (error) {
-                // TODO: Check jump destination to destinguish between a throw
-                //       and an actual invalid jump.
-                const invalidOpcode = error.message.search('invalid opcode') >= 0;
-                // TODO: When we contract A calls contract B, and B throws, instead
-                //       of an 'invalid jump', we get an 'out of gas' error. How do
-                //       we distinguish this from an actual out of gas event? (The
-                //       testrpc log actually show an 'invalid jump' event.)
-                const outOfGas = error.message.search('out of gas') >= 0;
-                const revert = error.message.search('revert') >= 0;
-                assert.isTrue(!invalidOpcode && !outOfGas && revert);
-            }
-            //revert to original state
-            await contract.setTransactionStatus(
-                TEST_ACCOUNTS.payer,
-                0,
-                web3.toHex("is_accepted"),
-                false,
-                { from: TEST_ACCOUNTS.owner }
-            ); 
-        });   
-    });
-    
-    describe("Function: cancelTransaction", () => {
-        // not sure if these are correct, they are semi correct
-        it("prohibited other users from accepting the transaction", async () => {
-            try {
-                await contract.acceptTransaction(0, {from: TEST_ACCOUNTS.manager});
-            } catch (error) {
-                // TODO: Check jump destination to destinguish between a throw
-                //       and an actual invalid jump.
-                const invalidOpcode = error.message.search('invalid opcode') >= 0;
-                // TODO: When we contract A calls contract B, and B throws, instead
-                //       of an 'invalid jump', we get an 'out of gas' error. How do
-                //       we distinguish this from an actual out of gas event? (The
-                //       testrpc log actually show an 'invalid jump' event.)
-                const outOfGas = error.message.search('out of gas') >= 0;
-                const revert = error.message.search('revert') >= 0;
-                assert.isTrue(invalidOpcode && !outOfGas && !revert);
-            }
-            //revert to original state
-            await contract.setTransactionStatus(
-                TEST_ACCOUNTS.payer,
-                0,
-                web3.toHex("is_cancelled"),
-                false,
-                { from: TEST_ACCOUNTS.owner }
-            );
-        });
-        
-        it("allowed payer to cancel the transaction when the status is pending", async () => {
-            try {
-                await contract.cancelTransaction(0, {from: TEST_ACCOUNTS.payer});
-            } catch (error) {
-                // TODO: Check jump destination to destinguish between a throw
-                //       and an actual invalid jump.
-                const invalidOpcode = error.message.search('invalid opcode') >= 0;
-                // TODO: When we contract A calls contract B, and B throws, instead
-                //       of an 'invalid jump', we get an 'out of gas' error. How do
-                //       we distinguish this from an actual out of gas event? (The
-                //       testrpc log actually show an 'invalid jump' event.)
-                const outOfGas = error.message.search('out of gas') >= 0;
-                const revert = error.message.search('revert') >= 0;
-                assert.isTrue(!invalidOpcode && !outOfGas && revert);
-            }
-            //revert to original state
-            await contract.setTransactionStatus(
-                TEST_ACCOUNTS.payer,
-                0,
-                web3.toHex("is_cancelled"),
-                false,
-                { from: TEST_ACCOUNTS.owner }
-            ); 
-        });   
-    });
-    
-    describe("Function: getUserTransactionsCount", () => {
-        it("got payer's transaction count", async () => {
-            contract.getUserTransactionsCount(TEST_ACCOUNTS.payer, 0).then((c) => {
-                assert.equal(c.toNumber(), 1);
-            });
-        }); 
-        
-        it("got payee's transaction count", async () => {
-            contract.getUserTransactionsCount(TEST_ACCOUNTS.payee, 1).then((c) => {
-                assert.equal(c.toNumber(), 1);
-            });
-        }); 
-    });
-    
-    describe("Function: getUserTransactionByID", () => {
-        it("got payer's transaction count", async () => {
-            contract.getUserTransactionByID(TEST_ACCOUNTS.payer, 0, 0).then((tbid) => {
-                let transaction = {
-                    payer: tbid[0],
-                    payee: tbid[1],
-                    manager: tbid[2],
-                    amount: tbid[3],
-                    status: tbid[4],
-                    ref: tbid[5],
-                };
-                assert.equal(transaction.payer, TEST_ACCOUNTS.payer);
-                assert.equal(transaction.payee, TEST_ACCOUNTS.payee);
-                assert.equal(transaction.manager, TEST_ACCOUNTS.manager);
-                assert.equal(
-                    transaction.amount.toNumber(),
-                    web3.toWei(1, "ether") -
-                    (web3.toWei(1, "ether") / 400)
-                );
-                assert.equal(transaction.status.toString().replace(/0+$/g, ""), web3.toHex("In Progress"));
-                assert.equal(transaction.ref.toString().replace(/0+$/g, ""), web3.toHex("test"));
-            });
-        }); 
-        
-        it("got payee's transaction count", async () => {
-            contract.getUserTransactionByID(TEST_ACCOUNTS.payee, 1, 0).then((tbid) => {
-                let transaction = {
-                    payer: tbid[0],
-                    payee: tbid[1],
-                    manager: tbid[2],
-                    amount: tbid[3],
-                    status: tbid[4],
-                    ref: tbid[5],
-                };
-                assert.equal(transaction.payer, TEST_ACCOUNTS.payer);
-                assert.equal(transaction.payee, TEST_ACCOUNTS.payee);
-                assert.equal(transaction.manager, TEST_ACCOUNTS.manager);
-                assert.equal(
-                    transaction.amount.toNumber(),
-                    web3.toWei(1, "ether") -
-                    (web3.toWei(1, "ether") / 400)
-                );
-                assert.equal(transaction.status.toString().replace(/0+$/g, ""), web3.toHex("In Progress"));
-                assert.equal(transaction.ref.toString().replace(/0+$/g, ""), web3.toHex("test"));
-            });
-        }); 
-    });
-    
-    describe("Functions: payerAudit, payeeAudit, transactionAudit", () => {
-        it("got payer's transaction audit", async () => {
-            contract.payerAudit(TEST_ACCOUNTS.payer, 0, 1).then((pr) => {
-                let payerRegistry = {
-                    payee: pr[0][0],
-                    manager: pr[1][0]
-                };
-                
-                assert.equal(payerRegistry.payee, TEST_ACCOUNTS.payee);
-                assert.equal(payerRegistry.manager, TEST_ACCOUNTS.manager);
-            });  
         });
 
-        it("got payee's transaction audit", async () => {
-            contract.payeeAudit(TEST_ACCOUNTS.payee, 0, 1).then((pr) => {
-                let payeeRegistry = {
-                    payer: pr[0][0],
-                    manager: pr[1][0]
-                };
-                
-                assert.equal(payeeRegistry.payer, TEST_ACCOUNTS.payer);
-                assert.equal(payeeRegistry.manager, TEST_ACCOUNTS.manager);
-            });  
+        describe("Function: acceptTransaction", () => {
+            let transaction;
+
+            beforeEach('create a transaction for each iteration', async () => {
+                transaction = await createMockTransaction();
+            });
+
+            //only pending state
+            //check result status
+            //locked user prohibited
+
+            it("prohibited other users than the payee from accepting the transaction", async () => {
+                try {
+                    await contract.acceptTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.MANAGER});
+                }
+                catch (error) {
+                    assert.isTrue(isProhibited(error));
+                }
+            });
+            
+            it("allowed payee to accept the transaction when the status is pending", async () => {
+                const result = await contract.acceptTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYEE});
+                assert.equal(result.receipt.status, 1);
+            });   
         });
 
-        it("got transaction audit", async () => {
-            contract.transactionAudit(TEST_ACCOUNTS.payer, 0, 1).then((ta) => {
-                let transactionRegistry = {
-                    payer: ta[0][0],
-                    payee: ta[1][0]
-                };
-                assert.equal(transactionRegistry.payer, TEST_ACCOUNTS.payer);
-                assert.equal(transactionRegistry.payee, TEST_ACCOUNTS.payee);
+        describe("Function: cancelTransaction", () => {
+            let transaction;
+
+            beforeEach('create a transaction for each iteration', async () => {
+                transaction = await createMockTransaction();
+            });
+
+            //only pending state
+            //deposit of payer
+            //locked user prohibited
+            //check result status
+
+            it("prohibited other users than the payer from cancelling the transaction", async () => {
+                try {
+                    await contract.cancelTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.MANAGER});
+                }
+                catch (error) {
+                    assert.isTrue(isProhibited(error));
+                }
+            });
+            
+            it("allowed payer to cancel the transaction when the status is pending", async () => {
+                const result = await contract.cancelTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYER});
+                assert.equal(result.receipt.status, 1);
+            });   
+        });
+
+        describe("Function: getUserTransactionsCount", () => {
+            const transactions = [];
+            const count = 5;
+
+            before('create 5 transactions for test', async () => {
+                for (let i = 0; i <= count; i++) {
+                    transactions[i] = await createMockTransaction();
+                }
+            });
+
+            it("got payer's transaction count", async () => {
+                const result = await contract.getUserTransactionsCount(TEST_ACCOUNTS.PAYER, USER_TYPES.PAYER);
+                assert.equal(result.toNumber(), lastTransactionIndex);
+            }); 
+            
+            it("got payee's transaction count", async () => {
+                const result = await contract.getUserTransactionsCount(TEST_ACCOUNTS.PAYEE, USER_TYPES.PAYEE);
+                assert.equal(result.toNumber(), lastTransactionIndex);
             }); 
         });
-    });
+
+        describe("Function: getUserTransactionByID", () => {
+            let transaction;
+
+            beforeEach('create a transaction for each iteration', async () => {
+                transaction = await createMockTransaction();
+            });
+
+            it("got payer's transaction", async () => {
+                const result = await contract.getUserTransactionByID(TEST_ACCOUNTS.PAYER, USER_TYPES.PAYER, transaction.lastTransactionIndex);
+                
+                const transactionRef = {
+                    payer: result[0],
+                    payee: result[1],
+                    manager: result[2],
+                    amount: result[3].toNumber(),
+                    status: result[4],
+                    is_locked: result[5],
+                    ref: result[6],
+                };                
+                
+                assert.equal(transactionRef.payer, TRANSACTION_MOCK.PAYER);
+                assert.equal(transactionRef.payee, TRANSACTION_MOCK.PAYEE);
+                assert.equal(transactionRef.manager, TRANSACTION_MOCK.MANAGER);
+                assert.equal(transactionRef.amount, deductOwnerFee(TRANSACTION_MOCK.AMOUNT));
+                assert.equal(transactionRef.status, toHex(TRANSACTION_STATUS.PENDING));
+                assert.equal(transactionRef.is_locked, TRANSACTION_MOCK.IS_LOCKED);
+                assert.equal(transactionRef.ref, toHex(TRANSACTION_MOCK.REF));
+            }); 
+            
+            it("got payee's transaction through the reference", async () => {
+                const result = await contract.getUserTransactionByID(TEST_ACCOUNTS.PAYEE, USER_TYPES.PAYEE, 0);
+
+                const transactionRef = {
+                    payer: result[0],
+                    payee: result[1],
+                    manager: result[2],
+                    amount: result[3].toNumber(),
+                    status: result[4],
+                    is_locked: result[5],
+                    ref: result[6],
+                };   
+
+                assert.equal(transactionRef.payer, TRANSACTION_MOCK.PAYER);
+                assert.equal(transactionRef.payee, TRANSACTION_MOCK.PAYEE);
+                assert.equal(transactionRef.manager, TRANSACTION_MOCK.MANAGER);
+                assert.equal(transactionRef.amount, deductOwnerFee(TRANSACTION_MOCK.AMOUNT));
+                assert.equal(transactionRef.status, toHex(TRANSACTION_STATUS.PENDING));
+                assert.equal(transactionRef.is_locked, TRANSACTION_MOCK.IS_LOCKED);
+                assert.equal(transactionRef.ref, toHex(TRANSACTION_MOCK.REF));
+            }); 
+        });
+
+        describe("Function: getTransactionStatus", () => {
+            it("got Pending status", async () => {
+                const transaction = await createMockTransaction();
+                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
+                assert.equal(result, toHex(TRANSACTION_STATUS.PENDING));
+            }); 
+            
+            it("got Accepted status", async () => { 
+                const transaction = await createMockTransaction();
+                await contract.acceptTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYEE});
     
-    describe("Functions: setTransactionStatus and getTransactionStatus", () => { 
-        it("set and got In Progress status", async () => { 
-            await contract.setTransactionStatus(
-                TEST_ACCOUNTS.payer,
-                0,
-                web3.toHex("is_accepted"),
-                false,
-                { from: TEST_ACCOUNTS.owner }
-            ).then(async (ts) => { 
-                await contract.getTransactionStatus(TEST_ACCOUNTS.payer, 0).then(async (ts2) => { 
-                    assert.equal(ts2, _.padEnd(web3.toHex("In Progress"), 66, '0'));                        
-                });  
-            });
-        }); 
-        
-        it("set and got Transaction Accepted status", async () => { 
-            await contract.setTransactionStatus(
-                TEST_ACCOUNTS.payer,
-                0,
-                web3.toHex("is_accepted"),
-                true,
-                { from: TEST_ACCOUNTS.owner }
-            ).then(async (ts) => { 
-                await contract.getTransactionStatus(TEST_ACCOUNTS.payer, 0).then(async (ts2) => { 
-                    assert.equal(ts2, _.padEnd(web3.toHex("Transaction Accepted"), 66, '0'));
-                    //revert to original state
-                    await contract.setTransactionStatus(
-                        TEST_ACCOUNTS.payer,
-                        0,
-                        web3.toHex("is_accepted"),
-                        false,
-                        { from: TEST_ACCOUNTS.owner }
-                    ); 
-                });  
-            });
-        }); 
-        
-        it("set and got Paid status", async () => { 
-            await contract.setTransactionStatus(
-                TEST_ACCOUNTS.payer,
-                0,
-                web3.toHex("paid"),
-                true,
-                { from: TEST_ACCOUNTS.owner }
-            ).then(async (ts) => { 
-                await contract.getTransactionStatus(TEST_ACCOUNTS.payer, 0).then(async (ts2) => { 
-                    assert.equal(ts2, _.padEnd(web3.toHex("Paid"), 66, '0'));
-                    
-                    //revert to original state
-                    await contract.setTransactionStatus(
-                        TEST_ACCOUNTS.payer,
-                        0,
-                        web3.toHex("paid"),
-                        false,
-                        { from: TEST_ACCOUNTS.owner }
-                    );          
-                });  
-            });
-        }); 
-        
-        it("set and got Refunded status", async () => { 
-            await contract.setTransactionStatus(
-                TEST_ACCOUNTS.payer,
-                0,
-                web3.toHex("refunded"),
-                true,
-                { from: TEST_ACCOUNTS.owner }
-            ).then(async (ts) => { 
-                await contract.getTransactionStatus(TEST_ACCOUNTS.payer, 0).then(async (ts2) => { 
-                    assert.equal(ts2, _.padEnd(web3.toHex("Refunded"), 66, '0'));
-                    //revert to original state
-                    await contract.setTransactionStatus(
-                        TEST_ACCOUNTS.payer,
-                        0,
-                        web3.toHex("refunded"),
-                        false,
-                        { from: TEST_ACCOUNTS.owner }
-                    );
-                });  
-            });
-        }); 
-        
-        it("set and got Awaiting Dispute Resolution status", async () => { 
-            await contract.setTransactionStatus(
-                TEST_ACCOUNTS.payer,
-                0,
-                web3.toHex("has_dispute"),
-                true,
-                { from: TEST_ACCOUNTS.owner }
-            ).then(async (ts) => { 
-                await contract.getTransactionStatus(TEST_ACCOUNTS.payer, 0).then(async (ts2) => { 
-                    assert.equal(ts2, _.padEnd(web3.toHex("Awaiting Dispute Resolution"), 66, '0'));
-                    //revert to original state
-                    await contract.setTransactionStatus(
-                        TEST_ACCOUNTS.payer,
-                        0,
-                        web3.toHex("has_dispute"),
-                        false,
-                        { from: TEST_ACCOUNTS.owner }
-                    );
-                });  
-            });
-        }); 
-        
-        it("set and got Transaction Locked status", async () => { 
-            await contract.setTransactionStatus(
-                TEST_ACCOUNTS.payer,
-                0,
-                web3.toHex("is_locked"),
-                true,
-                { from: TEST_ACCOUNTS.owner }
-            ).then(async (ts) => { 
-                await contract.getTransactionStatus(TEST_ACCOUNTS.payer, 0).then(async (ts2) => { 
-                    assert.equal(ts2, _.padEnd(web3.toHex("Transaction Locked"), 66, '0'));
-                    //revert to original state
-                    await contract.setTransactionStatus(
-                        TEST_ACCOUNTS.payer,
-                        0,
-                        web3.toHex("is_locked"),
-                        false,
-                        { from: TEST_ACCOUNTS.owner }
-                    );
-                });  
-            });
-        });  
-    });  
+                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
+                assert.equal(result, toHex(TRANSACTION_STATUS.ACCEPTED));
+            }); 
 
-    describe("Function: lockUnlockUserAccess", () => { 
-        it("set and got User Access Locked status", async () => { 
-            await contract.lockUnlockUserAccess(
-                TEST_ACCOUNTS.payer,
-                0, //locking
-                { from: TEST_ACCOUNTS.owner }
-            ).then(async (ts) => { 
-                await contract.getTransactionStatus(TEST_ACCOUNTS.payer, 0).then(async (ts2) => { 
-                    assert.equal(ts2, _.padEnd(web3.toHex("User Access Locked"), 66, '0'));
-                    //revert to original state
-                    await contract.lockUnlockUserAccess(
-                        TEST_ACCOUNTS.payer,
-                        1,
-                        { from: TEST_ACCOUNTS.owner }
-                    );
-                });  
+            it("got Cancelled status", async () => { 
+                const transaction = await createMockTransaction();
+                await contract.cancelTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYER});
+    
+                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
+                assert.equal(result, toHex(TRANSACTION_STATUS.CANCELLED));
+            });
+
+            it("got Locked status", async () => { 
+                const transaction = await createMockTransaction();
+                await contract.lockUnlockTransaction(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex, ACCESS_ACTION.LOCK, {from: TEST_ACCOUNTS.OWNER});
+    
+                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
+                assert.equal(result, toHex(TRANSACTION_STATUS.LOCKED));
+            });
+
+            it("got User Locked status", async () => { 
+                const transaction = await createMockTransaction(TEST_ACCOUNTS.LOCKED_USER);
+                await contract.lockUnlockUserAccess(TEST_ACCOUNTS.LOCKED_USER, ACCESS_ACTION.LOCK, {from: TEST_ACCOUNTS.OWNER});
+                
+                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.LOCKED_USER, transaction.lastTransactionIndex);
+                
+                assert.equal(result, toHex(TRANSACTION_STATUS.USER_LOCKED));
+            });
+         
+            //PAID
+            //REFUNDED
+            //DISPUTE
+
+        });
+
+        describe("Function: lockUnlockUserAccess", () => {
+            //only owner
+            //no other user
+            //user access locked status
+            //user access unlocked status
+
+            it("locked the user", async () => { 
+                const transaction = await createMockTransaction(TEST_ACCOUNTS.LOCKED_USER_2);
+                await contract.lockUnlockUserAccess(TEST_ACCOUNTS.LOCKED_USER_2, ACCESS_ACTION.LOCK, {from: TEST_ACCOUNTS.OWNER});
+                
+                const result = await contract.LockedUserRegistry(TEST_ACCOUNTS.LOCKED_USER_2);
+                
+                assert.isTrue(result);
+            });
+        });     
+
+        describe("Function: lockUnlockTransaction", () => {
+            //only owner
+            //no other user
+            //locked status
+            //unlocked status
+
+            it("locked the transaction", async () => { 
+                const transaction = await createMockTransaction();
+
+                await contract.lockUnlockTransaction(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex, ACCESS_ACTION.LOCK, {from: TEST_ACCOUNTS.OWNER});
+    
+                //const result = await contract.PayerRegistry(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
+                //console.log('res', result);
+                //assert.equal(result.is_locked);
             });
         });
-    });     
 
-    describe("Function: lockUnlockTransaction", () => { 
-        it("set and got Transaction Locked status", async () => { 
-            await contract.lockUnlockTransaction(
-                TEST_ACCOUNTS.payer,
-                0,
-                0, //locking
-                { from: TEST_ACCOUNTS.owner }
-            ).then(async (ts) => { 
-                await contract.getTransactionStatus(TEST_ACCOUNTS.payer, 0).then(async (ts2) => { 
-                    assert.equal(ts2, _.padEnd(web3.toHex("Transaction Locked"), 66, '0'));
-                    //revert to original state
-                    await contract.lockUnlockTransaction(
-                        TEST_ACCOUNTS.payer,
-                        0,
-                        1,
-                        { from: TEST_ACCOUNTS.owner }
-                    );
-                });  
-            });
-        });
-    });     
-
-    describe("Functions: releaseDeposit & withdrawDeposits", () => {
-        it("releaseDeposit released the deposit to payee's Deposit", async () => {
-            await contract.getUserTransactionByID(TEST_ACCOUNTS.payer, 0, 0).then(async (tbid) => {
-                let transaction = {
-                    amount: tbid[3]
+        /* describe("Functions: releaseDeposit & withdrawDeposits", () => {
+            it("releaseDeposit released the deposit to payee's Deposit", async () => {
+                const transaction = await contract.getUserTransactionByID(TEST_ACCOUNTS.PAYER, 0, 0);
+                const transactionDetails = {
+                    amount: transaction[3]
                 };
-
+    
                 await contract.releaseDeposit(
-                    TEST_ACCOUNTS.payer,
+                    TEST_ACCOUNTS.PAYER,
                     0,
-                    { from: TEST_ACCOUNTS.payer }
-                ).then(async (ts) => { 
-                    await contract.Deposits(TEST_ACCOUNTS.payee).then((od) => {
-                        assert.equal(od.toNumber(), transaction.amount.toNumber());
-                    });  
-                });
-            }); 
-        });
-
-        it("withdrawDeposits released the deposit to payee's account", async () => {
-            await contract.getUserTransactionByID(TEST_ACCOUNTS.payer, 0, 0).then(async (tbid) => {
-                let transaction = {
-                    amount: tbid[3]
+                    { from: TEST_ACCOUNTS.PAYER }
+                );
+                const result = await contract.Deposits(TEST_ACCOUNTS.PAYEE);
+                assert.equal(result.toNumber(), transactionDetails.amount.toNumber());
+            });
+    
+            it("withdrawDeposits released the deposit to payee's account", async () => {
+                const transaction = await contract.getUserTransactionByID(TEST_ACCOUNTS.PAYER, 0, 0);
+                let transactionDetails = {
+                    amount: transaction[3]
                 };
+    
+                const balanceBeforeWithdraw = web3.eth.getBalance(TEST_ACCOUNTS.PAYEE).toNumber();                
+    
+                const result = await contract.withdrawDeposits({from: TEST_ACCOUNTS.PAYEE});
+    
+                const t = web3.eth.getTransaction(result.receipt.transactionHash);
+                
+                const depositedAmount = transactionDetails.amount.toNumber();
+                const currentBalance = await (web3.eth.getBalance(TEST_ACCOUNTS.PAYEE)).toNumber();
+                const balanceAfterWithdraw = (depositedAmount + balanceBeforeWithdraw) - calculateGasUsed(t.gasPrice, result.receipt.gasUsed).toNumber();
+                
+                assert.equal(currentBalance, balanceAfterWithdraw);
+            });
+    
+        }); */
 
-                const balanceBeforeWithdraw = web3.eth.getBalance(TEST_ACCOUNTS.payee).toNumber();                
-
-                await contract.withdrawDeposits({from: TEST_ACCOUNTS.payee}).then(async (tx) => {
-                    const t = web3.eth.getTransaction(tx.receipt.transactionHash);
-                    const depositedAmount = transaction.amount.toNumber();
-                    const currentBalance = await (web3.eth.getBalance(TEST_ACCOUNTS.payee)).toNumber();
-                    const balanceAfterWithdraw = (depositedAmount + balanceBeforeWithdraw) - t.gasPrice.mul(tx.receipt.gasUsed).toNumber();
-                    
-                    assert.equal(currentBalance, balanceAfterWithdraw);
-                });
-            }); 
-        });
-
-    });
         
+        
+    });       
 });
