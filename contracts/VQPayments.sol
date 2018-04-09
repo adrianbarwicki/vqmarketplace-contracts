@@ -403,8 +403,9 @@ contract VQPayments
 
     function freezeContract()
         public
-        onlyOwner
     {
+        require(msg.sender == owner);
+        
         is_frozen = true;
     }
 

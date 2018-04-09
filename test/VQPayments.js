@@ -159,10 +159,12 @@ contract('VQPayments', async (accounts) => {
             //check result status
 
             it("prohibited other users than the payee from accepting the transaction", async () => {
-                try {
+                try
+                {
                     await contract.acceptTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.MANAGER});
                 }
-                catch (error) {
+                catch (error)
+                {
                     assert.isTrue(isProhibited(error));
                 }
             });
@@ -185,10 +187,12 @@ contract('VQPayments', async (accounts) => {
             //check result status
 
             it("prohibited other users than the payer from cancelling the transaction", async () => {
-                try {
+                try
+                {
                     await contract.cancelTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.MANAGER});
                 }
-                catch (error) {
+                catch (error)
+                {
                     assert.isTrue(isProhibited(error));
                 }
             });
@@ -303,10 +307,15 @@ contract('VQPayments', async (accounts) => {
 
             it("frozen the contract which blocks createTransaction", async () => { 
                 await contract.freezeContract({from: TEST_ACCOUNTS.OWNER});
-                const transaction = await createMockTransaction();
-                console.log(transaction)
                 
-                //assert.isTrue(result);
+                try
+                {
+                    await createMockTransaction();
+                }
+                catch(error)
+                {
+                    assert.isTrue(expectError(error));
+                }
             });
         });     
 
