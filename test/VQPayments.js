@@ -29,10 +29,9 @@ contract('VQPayments', async (accounts) => {
     const TRANSACTION_STATE = {
         PENDING: 0,
         ACCEPTED: 1,
-        DISPUTED: 2,
-        PAID: 3,
-        REFUNDED: 4,
-        CANCELLED: 5,
+        PAID: 2,
+        REFUNDED: 3,
+        CANCELLED: 4,
     };
     
     const USER_TYPES = {
@@ -53,8 +52,6 @@ contract('VQPayments', async (accounts) => {
         CANCELLED: "Cancelled",
         PAID: "Paid",
         REFUNDED: "Refunded",
-        DISPUTED: "Awaiting Dispute Resolution",
-
     }
 
     const TRANSACTION_MOCK = {
@@ -112,7 +109,7 @@ contract('VQPayments', async (accounts) => {
             it("deposited correct amount of money to owner account", async () => {
                 const result = await contract.Deposits(TEST_ACCOUNTS.OWNER)
                 
-                assert.equal(result, getOwnerFee(web3.toWei(1, "ether")));
+                assert.equal(result, getOwnerFee(TRANSACTION_MOCK.AMOUNT));
             });
             
             it("added transaction to PayerRegistry", async () => {
@@ -155,8 +152,17 @@ contract('VQPayments', async (accounts) => {
                 transaction = await createMockTransaction();
             });
 
-            //only pending state
-            //check result status
+            it("prohibited payee from accepting the transaction when not pending state", async () => {
+                await contract.acceptTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYEE});
+                try
+                {
+                    await contract.acceptTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYEE});
+                }
+                catch (error)
+                {
+                    assert.isTrue(expectError(error));
+                }
+            });
 
             it("prohibited other users than the payee from accepting the transaction", async () => {
                 try
@@ -172,7 +178,16 @@ contract('VQPayments', async (accounts) => {
             it("allowed payee to accept the transaction when the status is pending", async () => {
                 const result = await contract.acceptTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYEE});
                 assert.equal(result.receipt.status, 1);
-            });   
+            });
+
+            it("got Accepted status", async () => { 
+                const transaction = await createMockTransaction();
+                await contract.acceptTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYEE});
+    
+                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
+                assert.equal(result, toHex(TRANSACTION_STATUS.ACCEPTED));
+            }); 
+
         });
 
         describe("Function: cancelTransaction", () => {
@@ -182,9 +197,17 @@ contract('VQPayments', async (accounts) => {
                 transaction = await createMockTransaction();
             });
 
-            //only pending state
-            //deposit of payer
-            //check result status
+            it("prohibited payer from canceling the transaction when not pending state", async () => {
+                await contract.acceptTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYEE});
+                try
+                {
+                    await contract.cancelTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYER});
+                }
+                catch (error)
+                {
+                    assert.isTrue(expectError(error));
+                }
+            });
 
             it("prohibited other users than the payer from cancelling the transaction", async () => {
                 try
@@ -201,6 +224,16 @@ contract('VQPayments', async (accounts) => {
                 const result = await contract.cancelTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYER});
                 assert.equal(result.receipt.status, 1);
             });   
+
+            it("deposited correct amount of money to payer deposit", async () => {
+                
+                const depositBeforeRefund = (await contract.Deposits(TEST_ACCOUNTS.PAYER)).toNumber();
+
+                await contract.cancelTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYER});
+                const depositAfterRefund = (await contract.Deposits(TEST_ACCOUNTS.PAYER)).toNumber();
+                
+                assert.equal(depositAfterRefund - depositBeforeRefund, deductOwnerFee(TRANSACTION_MOCK.AMOUNT));
+            });
         });
 
         describe("Function: getUserTransactionsCount", () => {
@@ -294,16 +327,113 @@ contract('VQPayments', async (accounts) => {
                 const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
                 assert.equal(result, toHex(TRANSACTION_STATUS.CANCELLED));
             });
-         
-            //PAID
-            //REFUNDED
-            //DISPUTE
 
+            it("got Paid status", async () => { 
+                const transaction = await createMockTransaction();
+                await contract.acceptTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYEE});
+                await contract.releaseDeposit(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYER});
+    
+                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
+                assert.equal(result, toHex(TRANSACTION_STATUS.PAID));
+            });
+
+            it("got Refunded status", async () => { 
+                const transaction = await createMockTransaction();
+                await contract.acceptTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYEE});
+                await contract.refundDeposit(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYEE});
+    
+                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
+                assert.equal(result, toHex(TRANSACTION_STATUS.REFUNDED));
+            });
+
+        }); 
+
+        describe("Function: releaseDeposit", () => {
+            let transaction;
+
+            beforeEach('create a transaction and accept it for each iteration', async () => {
+                transaction = await createMockTransaction();
+                await contract.acceptTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYEE});
+            });
+
+            it("deposited correct amount of money to payee deposit", async () => {
+                
+                const depositBeforeRelease = (await contract.Deposits(TEST_ACCOUNTS.PAYEE)).toNumber();
+
+                await contract.releaseDeposit(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYER});
+                const depositAfterRelease = (await contract.Deposits(TEST_ACCOUNTS.PAYEE)).toNumber();
+                
+                assert.equal(depositAfterRelease - depositBeforeRelease, deductOwnerFee(TRANSACTION_MOCK.AMOUNT));
+            });
+
+
+            it("got Paid status", async () => { 
+                await contract.releaseDeposit(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYER});
+    
+                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
+                assert.equal(result, toHex(TRANSACTION_STATUS.PAID));
+            });
+    
+        });
+
+        describe("Function: refundDeposit", () => {
+            let transaction;
+
+            beforeEach('create a transaction and accept it for each iteration', async () => {
+                transaction = await createMockTransaction();
+                await contract.acceptTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYEE});
+            });
+
+            it("deposited correct amount of money to payer deposit", async () => {
+                
+                const depositBeforeRelease = (await contract.Deposits(TEST_ACCOUNTS.PAYER)).toNumber();
+
+                await contract.refundDeposit(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYEE});
+                const depositAfterRelease = (await contract.Deposits(TEST_ACCOUNTS.PAYER)).toNumber();
+                
+                assert.equal(depositAfterRelease - depositBeforeRelease, deductOwnerFee(TRANSACTION_MOCK.AMOUNT));
+            });
+
+            it("got Refunded status", async () => { 
+                await contract.refundDeposit(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYEE});
+    
+                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
+                assert.equal(result, toHex(TRANSACTION_STATUS.REFUNDED));
+            });
+    
+        });
+
+        describe("Function: withdrawDeposits", () => {
+            it("released the deposit to payee's account", async () => {
+                const transaction = await createMockTransaction();
+    
+                const balanceBeforeWithdraw = web3.eth.getBalance(TEST_ACCOUNTS.PAYEE).toNumber();
+                const deposits = (await contract.Deposits(TEST_ACCOUNTS.PAYEE)).toNumber();             
+    
+                const result = await contract.withdrawDeposits({from: TEST_ACCOUNTS.PAYEE});
+
+                const balanceAfterWithdraw = web3.eth.getBalance(TEST_ACCOUNTS.PAYEE).toNumber();
+
+                const t = web3.eth.getTransaction(result.receipt.transactionHash);
+ 
+                assert.equal(balanceBeforeWithdraw + deposits - calculateGasUsed(t.gasPrice, result.receipt.gasUsed).toNumber(), balanceAfterWithdraw);
+                
+            });
         });
 
         describe("Function: freezeContract", () => {
-            //only owner
-            //no other user
+
+            it("prohibited other users than the owner from locking the contract", async () => {
+                try
+                {
+                    await contract.freezeContract({from: TEST_ACCOUNTS.MANAGER});
+                }
+                catch (error)
+                {
+                    assert.isTrue(isProhibited(error));
+                }
+            });
+
 
             it("frozen the contract which blocks createTransaction", async () => { 
                 await contract.freezeContract({from: TEST_ACCOUNTS.OWNER});
@@ -317,46 +447,8 @@ contract('VQPayments', async (accounts) => {
                     assert.isTrue(expectError(error));
                 }
             });
-        });     
-
-        /* describe("Functions: releaseDeposit & withdrawDeposits", () => {
-            it("releaseDeposit released the deposit to payee's Deposit", async () => {
-                const transaction = await contract.getUserTransactionByID(TEST_ACCOUNTS.PAYER, 0, 0);
-                const transactionDetails = {
-                    amount: transaction[3]
-                };
-    
-                await contract.releaseDeposit(
-                    TEST_ACCOUNTS.PAYER,
-                    0,
-                    { from: TEST_ACCOUNTS.PAYER }
-                );
-                const result = await contract.Deposits(TEST_ACCOUNTS.PAYEE);
-                assert.equal(result.toNumber(), transactionDetails.amount.toNumber());
-            });
-    
-            it("withdrawDeposits released the deposit to payee's account", async () => {
-                const transaction = await contract.getUserTransactionByID(TEST_ACCOUNTS.PAYER, 0, 0);
-                let transactionDetails = {
-                    amount: transaction[3]
-                };
-    
-                const balanceBeforeWithdraw = web3.eth.getBalance(TEST_ACCOUNTS.PAYEE).toNumber();                
-    
-                const result = await contract.withdrawDeposits({from: TEST_ACCOUNTS.PAYEE});
-    
-                const t = web3.eth.getTransaction(result.receipt.transactionHash);
-                
-                const depositedAmount = transactionDetails.amount.toNumber();
-                const currentBalance = await (web3.eth.getBalance(TEST_ACCOUNTS.PAYEE)).toNumber();
-                const balanceAfterWithdraw = (depositedAmount + balanceBeforeWithdraw) - calculateGasUsed(t.gasPrice, result.receipt.gasUsed).toNumber();
-                
-                assert.equal(currentBalance, balanceAfterWithdraw);
-            });
-    
-        }); */
-
-        
+        });    
         
     });       
 });
+

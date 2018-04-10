@@ -60,7 +60,7 @@ const getOwnerFee = function(number) {
 }
 
 const calculateGasUsed = function(gasPrice, gasUsed) {
-    return gasPrice.mul(gasUsed);
+    return gasPrice.mul(web3.toBigNumber(gasUsed));
 }
 
 

@@ -61,7 +61,6 @@ contract VQPayments
     {
         PENDING,
         ACCEPTED,
-        DISPUTED,
         PAID,
         REFUNDED,
         CANCELLED
@@ -140,16 +139,19 @@ contract VQPayments
     )
         public
         onlyPayee(txID)
-        onlyWhen(PayerRegistry[PayeeRegistry[msg.sender][txID].payer][txID].status == TransactionStatus.PENDING)
+        onlyWhen(PayerRegistry[
+                PayeeRegistry[msg.sender][txID].payer
+            ][
+                PayeeRegistry[msg.sender][txID].tx_index
+            ].status == TransactionStatus.PENDING)
         returns (
             bool
         )
     {
         address payer = PayeeRegistry[msg.sender][txID].payer;
         uint _txID = PayeeRegistry[msg.sender][txID].tx_index;
-        Transaction storage currentTransaction = PayerRegistry[payer][_txID];
 
-        currentTransaction.status = TransactionStatus.ACCEPTED;
+        PayerRegistry[payer][_txID].status = TransactionStatus.ACCEPTED;
 
         return true;
     }
@@ -164,11 +166,9 @@ contract VQPayments
             bool
         )
     {
-        Transaction storage currentTransaction = PayerRegistry[msg.sender][txID];
-
-        currentTransaction.status = TransactionStatus.CANCELLED;
+        PayerRegistry[msg.sender][txID].status = TransactionStatus.CANCELLED;
         
-        Deposits[currentTransaction.payer] += currentTransaction.amount;
+        Deposits[msg.sender] += PayerRegistry[msg.sender][txID].amount;
 
         return true;
     }
@@ -375,36 +375,63 @@ contract VQPayments
         {
             status = "Refunded";
         }
-        else if (PayerRegistry[payer][txID].status == TransactionStatus.DISPUTED)
-        {
-            status = "Awaiting Dispute Resolution";
-        }
         
         return status;
     }
 
     function releaseDeposit(
-        address user,
         uint txID
     )
         public
-        payable
         onlyPayer(txID)
-        onlyWhen(txID < PayerRegistry[user].length)
+        onlyWhen(txID < PayerRegistry[msg.sender].length)
         onlyWhen(PayerRegistry[msg.sender][txID].status == TransactionStatus.ACCEPTED)
     {       
-        PayerRegistry[user][txID].status = TransactionStatus.PAID;
+        PayerRegistry[msg.sender][txID].status = TransactionStatus.PAID;
 
-        address payee = PayerRegistry[user][txID].payee;
-        uint amount = PayerRegistry[user][txID].amount;
+        address payee = PayerRegistry[msg.sender][txID].payee;
+        uint amount = PayerRegistry[msg.sender][txID].amount;
 
         Deposits[payee] += amount;
     }
 
+    function refundDeposit(
+        uint txID
+    )
+        public
+        onlyPayee(txID)
+        onlyWhen(txID < PayerRegistry[
+                PayeeRegistry[msg.sender][txID].payer
+            ].length
+        )
+        onlyWhen(PayerRegistry[
+                PayeeRegistry[msg.sender][txID].payer
+            ][
+                PayeeRegistry[msg.sender][txID].tx_index
+            ].status == TransactionStatus.ACCEPTED
+        )
+    {       
+        PayerRegistry[
+            PayeeRegistry[msg.sender][txID].payer
+        ][
+            PayeeRegistry[msg.sender][txID].tx_index
+        ].status = TransactionStatus.REFUNDED;
+
+        uint amount = PayerRegistry[
+            PayeeRegistry[msg.sender][txID].payer
+        ][
+            PayeeRegistry[msg.sender][txID].tx_index
+        ].amount;
+
+        Deposits[
+                PayeeRegistry[msg.sender][txID].payer
+            ] += amount;
+    }
+
     function freezeContract()
         public
+        onlyOwner
     {
-        require(msg.sender == owner);
         
         is_frozen = true;
     }
