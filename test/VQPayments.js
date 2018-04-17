@@ -184,7 +184,7 @@ contract('VQPayments', async (accounts) => {
                 const transaction = await createMockTransaction();
                 await contract.acceptTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYEE});
     
-                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
+                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, 0, transaction.lastTransactionIndex);
                 assert.equal(result, toHex(TRANSACTION_STATUS.ACCEPTED));
             }); 
 
@@ -308,7 +308,7 @@ contract('VQPayments', async (accounts) => {
         describe("Function: getTransactionStatus", () => {
             it("got Pending status", async () => {
                 const transaction = await createMockTransaction();
-                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
+                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, 0, transaction.lastTransactionIndex);
                 assert.equal(result, toHex(TRANSACTION_STATUS.PENDING));
             }); 
             
@@ -316,7 +316,7 @@ contract('VQPayments', async (accounts) => {
                 const transaction = await createMockTransaction();
                 await contract.acceptTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYEE});
     
-                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
+                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, 0, transaction.lastTransactionIndex);
                 assert.equal(result, toHex(TRANSACTION_STATUS.ACCEPTED));
             }); 
 
@@ -324,7 +324,7 @@ contract('VQPayments', async (accounts) => {
                 const transaction = await createMockTransaction();
                 await contract.cancelTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYER});
     
-                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
+                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, 0, transaction.lastTransactionIndex);
                 assert.equal(result, toHex(TRANSACTION_STATUS.CANCELLED));
             });
 
@@ -333,7 +333,7 @@ contract('VQPayments', async (accounts) => {
                 await contract.acceptTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYEE});
                 await contract.releaseDeposit(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYER});
     
-                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
+                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, 0, transaction.lastTransactionIndex);
                 assert.equal(result, toHex(TRANSACTION_STATUS.PAID));
             });
 
@@ -342,7 +342,7 @@ contract('VQPayments', async (accounts) => {
                 await contract.acceptTransaction(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYEE});
                 await contract.refundDeposit(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYEE});
     
-                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
+                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, 0, transaction.lastTransactionIndex);
                 assert.equal(result, toHex(TRANSACTION_STATUS.REFUNDED));
             });
 
@@ -370,7 +370,7 @@ contract('VQPayments', async (accounts) => {
             it("got Paid status", async () => { 
                 await contract.releaseDeposit(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYER});
     
-                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
+                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, 0, transaction.lastTransactionIndex);
                 assert.equal(result, toHex(TRANSACTION_STATUS.PAID));
             });
     
@@ -397,7 +397,7 @@ contract('VQPayments', async (accounts) => {
             it("got Refunded status", async () => { 
                 await contract.refundDeposit(transaction.lastTransactionIndex, {from: TEST_ACCOUNTS.PAYEE});
     
-                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, transaction.lastTransactionIndex);
+                const result = await contract.getTransactionStatus(TEST_ACCOUNTS.PAYER, 0, transaction.lastTransactionIndex);
                 assert.equal(result, toHex(TRANSACTION_STATUS.REFUNDED));
             });
     
@@ -421,7 +421,7 @@ contract('VQPayments', async (accounts) => {
             });
         });
 
-        describe("Function: freezeContract", () => {
+/*         describe("Function: freezeContract", () => {
 
             it("prohibited other users than the owner from locking the contract", async () => {
                 try
@@ -447,7 +447,7 @@ contract('VQPayments', async (accounts) => {
                     assert.isTrue(expectError(error));
                 }
             });
-        });    
+        });  */   
         
     });       
 });

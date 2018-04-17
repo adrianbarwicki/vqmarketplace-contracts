@@ -214,7 +214,7 @@ contract VQPayments
         if (userType == 0)
         {
             currentTransaction = PayerRegistry[user][txID];
-            status = getTransactionStatus(user, txID);
+            status = getTransactionStatus(user, 0, txID);
         } 
         else if (userType == 1)
         {  
@@ -223,7 +223,7 @@ contract VQPayments
             ][
                 PayeeRegistry[user][txID].tx_index
             ];
-            status = getTransactionStatus(currentTransaction.payer, PayeeRegistry[user][txID].tx_index);
+            status = getTransactionStatus(currentTransaction.payer, 0, PayeeRegistry[user][txID].tx_index);
         }   
 
         return (
@@ -279,7 +279,7 @@ contract VQPayments
                 payees[i] = PayerRegistry[user][offset + i].payee;
                 managers[i] = PayerRegistry[user][offset + i].manager;
                 amounts[i] = PayerRegistry[user][offset + i].amount;
-                statuses[i] = getTransactionStatus(user, offset + i);
+                statuses[i] = getTransactionStatus(user, userType, offset + i);
                 refs[i] = PayerRegistry[user][offset + i].ref;
             }
         } 
@@ -322,7 +322,7 @@ contract VQPayments
                     PayeeRegistry[user][offset + j].tx_index
                 ].amount;
 
-                statuses[j] = getTransactionStatus(PayeeRegistry[user][offset + j].payer, PayeeRegistry[user][offset + j].tx_index);
+                statuses[j] = getTransactionStatus(PayeeRegistry[user][offset + j].payer, userType, PayeeRegistry[user][offset + j].tx_index);
 
                 refs[j] = PayerRegistry[
                     PayeeRegistry[user][offset + j].payer
@@ -344,7 +344,8 @@ contract VQPayments
     } */
 
     function getTransactionStatus(
-        address payer,
+        address user,
+        uint userType,
         uint txID
     )
         public
@@ -354,24 +355,38 @@ contract VQPayments
         )
     {
         bytes32 status = "";
+        Transaction memory currentTransaction;
 
-        if (PayerRegistry[payer][txID].status == TransactionStatus.PENDING)
+        if (userType == 0)
+        {
+            currentTransaction = PayerRegistry[user][txID];
+        } 
+        else if (userType == 1)
+        {  
+            currentTransaction = PayerRegistry[
+                PayeeRegistry[user][txID].payer
+            ][
+                PayeeRegistry[user][txID].tx_index
+            ];
+        }   
+
+        if (currentTransaction.status == TransactionStatus.PENDING)
         {
             status = "Pending";
         }
-        else if (PayerRegistry[payer][txID].status == TransactionStatus.ACCEPTED)
+        else if (currentTransaction.status == TransactionStatus.ACCEPTED)
         {
             status = "Accepted";
         }
-        else if (PayerRegistry[payer][txID].status == TransactionStatus.CANCELLED)
+        else if (currentTransaction.status == TransactionStatus.CANCELLED)
         {
             status = "Cancelled";
         }
-        else if (PayerRegistry[payer][txID].status == TransactionStatus.PAID)
+        else if (currentTransaction.status == TransactionStatus.PAID)
         {
             status = "Paid";
         }
-        else if (PayerRegistry[payer][txID].status == TransactionStatus.REFUNDED)
+        else if (currentTransaction.status == TransactionStatus.REFUNDED)
         {
             status = "Refunded";
         }
@@ -435,8 +450,6 @@ contract VQPayments
         
         is_frozen = true;
     }
-
-    
     
     function withdrawDeposits()
         public
